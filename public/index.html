@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Illustrated Explainer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Georgia', serif; background: #faf8f5; color: #333; min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* --- Top bar --- */
+  .top-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e8e4df; flex-shrink: 0; gap: 12px; flex-wrap: wrap; }
+  .top-bar h1 { font-size: 16px; font-weight: 600; color: #555; letter-spacing: 0.5px; white-space: nowrap; }
+  .top-bar .page-counter { font-size: 13px; color: #888; min-width: 50px; text-align: center; }
+  .controls { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn { padding: 5px 14px; border: 1px solid #ccc; background: #fff; border-radius: 6px; font-family: inherit; font-size: 12px; cursor: pointer; color: #555; transition: all 0.15s; }
+  .btn:hover:not(:disabled) { background: #f0ede8; border-color: #aaa; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn.drill-btn.active { background: #5a7d6a; color: #fff; border-color: #5a7d6a; }
+  .btn.drill-btn.active:hover { background: #4a6a58; }
+
+  /* --- Topic area --- */
+  .topic-area { display: flex; justify-content: center; padding: 14px 20px; flex-shrink: 0; }
+  .topic-form { display: flex; gap: 8px; width: 100%; max-width: 700px; align-items: center; flex-wrap: wrap; }
+  .mode-selector { display: flex; gap: 0; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+  .mode-btn { padding: 8px 14px; border: none; background: #fff; font-family: inherit; font-size: 12px; cursor: pointer; color: #888; transition: all 0.15s; border-right: 1px solid #e8e4df; }
+  .mode-btn:last-child { border-right: none; }
+  .mode-btn:hover:not(.active) { background: #f7f5f2; color: #555; }
+  .mode-btn.active { background: #5a7d6a; color: #fff; }
+  .mode-btn.active.map-mode { background: #6b5a3e; }
+  .mode-btn:disabled { opacity: 0.5; cursor: default; }
+  .topic-input { flex: 1; min-width: 180px; padding: 8px 14px; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; font-size: 14px; background: #fff; outline: none; }
+  .topic-input:focus { border-color: #999; }
+  .topic-input:disabled { opacity: 0.5; }
+  .generate-btn { padding: 8px 20px; background: #5a7d6a; color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .generate-btn:hover:not(:disabled) { background: #4a6a58; }
+  .generate-btn:disabled { opacity: 0.5; cursor: default; }
+  .upload-btn { padding: 8px 14px; background: #fff; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; font-size: 12px; cursor: pointer; color: #555; }
+  .upload-btn:hover { background: #f0ede8; border-color: #aaa; }
+  .upload-btn:disabled { opacity: 0.5; cursor: default; }
+
+  /* --- Canvas area --- */
+  .canvas-area { flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px 20px; position: relative; min-height: 300px; }
+  .canvas-area.empty { color: #bbb; font-size: 15px; font-style: italic; }
+  .canvas-area.generating { color: #777; font-size: 15px; flex-direction: column; gap: 14px; }
+  .canvas-area.generating .spinner-large { width: 36px; height: 36px; border: 4px solid #ddd; border-top-color: #5a7d6a; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  .image-container { position: relative; max-width: 100%; max-height: 100%; }
+  .image-container.clickable { cursor: crosshair; }
+  .image-container img { display: block; max-width: 100%; max-height: calc(100vh - 260px); border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+  .loading-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(250,248,245,0.85); border-radius: 4px; font-size: 14px; color: #777; }
+  .loading-overlay .spinner { width: 22px; height: 22px; border: 3px solid #ddd; border-top-color: #5a7d6a; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* --- Click marker (visual confirmation) --- */
+  .click-marker { position: absolute; pointer-events: none; transform: translate(-50%, -50%); z-index: 5; }
+  .click-marker .ring { width: 48px; height: 48px; border-radius: 50%; border: 3px solid rgba(220,50,50,0.8); background: rgba(220,50,50,0.12); animation: marker-pulse 1.5s ease-in-out infinite; }
+  .click-marker .dot { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; border-radius: 50%; background: rgba(220,50,50,0.85); transform: translate(-50%, -50%); }
+  @keyframes marker-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }
+
+  /* Confirm bar */
+  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 6; background: #fff; padding: 8px 16px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; }
+  .confirm-bar .btn { font-size: 13px; padding: 6px 18px; }
+  .confirm-bar .btn.confirm-go { background: #5a7d6a; color: #fff; border-color: #5a7d6a; }
+  .confirm-bar .btn.confirm-go:hover { background: #4a6a58; }
+
+  /* --- Error banner --- */
+  .error-banner { display: none; padding: 6px 20px; background: #fef2f2; color: #b91c1c; font-size: 12px; text-align: center; border-top: 1px solid #fecaca; flex-shrink: 0; }
+  .error-banner.visible { display: block; }
+
+  /* --- Thumbnail strip --- */
+  .thumbnail-strip { display: flex; gap: 6px; padding: 10px 20px; background: #fff; border-top: 1px solid #e8e4df; overflow-x: auto; flex-shrink: 0; min-height: 70px; align-items: center; }
+  .thumbnail-strip.hidden { display: none; }
+  .thumb { width: 88px; height: 50px; border-radius: 4px; object-fit: cover; border: 2px solid transparent; cursor: pointer; flex-shrink: 0; opacity: 0.6; transition: all 0.15s; }
+  .thumb:hover { opacity: 0.9; }
+  .thumb.active { border-color: #5a7d6a; opacity: 1; box-shadow: 0 0 0 1px #5a7d6a; }
+  .thumb-index { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
+  .thumb-index span { font-size: 10px; color: #999; }
+
+  /* --- Slide panels (gallery, settings) --- */
+  .panel-overlay { display: none; position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.3); }
+  .panel-overlay.visible { display: block; }
+  .slide-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 90vw); background: #fff; border-left: 1px solid #e8e4df; z-index: 51; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; box-shadow: -4px 0 24px rgba(0,0,0,0.08); }
+  .slide-panel.visible { transform: translateX(0); }
+  .panel-header { padding: 14px 18px; border-bottom: 1px solid #e8e4df; display: flex; justify-content: space-between; align-items: center; }
+  .panel-header h2 { font-size: 15px; font-weight: 600; color: #444; }
+  .panel-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #999; padding: 4px 8px; }
+  .panel-close:hover { color: #333; }
+  .panel-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
+
+  /* Gallery items */
+  .gallery-base-path { font-size: 11px; color: #999; font-family: monospace; padding: 6px 10px; background: #f7f5f2; border-radius: 4px; margin-bottom: 14px; word-break: break-all; }
+  .gallery-folder { margin-bottom: 16px; border: 1px solid #e8e4df; border-radius: 6px; overflow: hidden; }
+  .gallery-folder-header { padding: 8px 12px; background: #faf8f5; border-bottom: 1px solid #e8e4df; display: flex; justify-content: space-between; align-items: center; }
+  .gallery-folder-title { font-size: 12px; font-weight: 600; color: #444; }
+  .gallery-folder-meta { font-size: 11px; color: #999; display: flex; gap: 8px; align-items: center; }
+  .mode-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: #e8f5e9; color: #2e7d32; }
+  .mode-tag.map { background: #fff3e0; color: #6b5a3e; }
+  .gallery-folder-path { font-size: 10px; color: #bbb; font-family: monospace; padding: 4px 12px; word-break: break-all; }
+  .gallery-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; padding: 8px 12px; }
+  .gallery-img-card { border-radius: 4px; overflow: hidden; border: 1px solid #e8e4df; cursor: pointer; }
+  .gallery-img-card:hover { border-color: #aaa; }
+  .gallery-img-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
+  .gallery-img-meta { font-size: 9px; color: #999; padding: 3px 6px; font-family: monospace; display: flex; justify-content: space-between; }
+
+  /* Settings panel */
+  .setting-group { margin-bottom: 20px; }
+  .setting-group label { display: block; font-size: 12px; font-weight: 600; color: #555; margin-bottom: 6px; }
+  .setting-group .desc { font-size: 11px; color: #999; margin-bottom: 8px; }
+  .setting-select { width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-family: inherit; font-size: 13px; background: #fff; }
+  .setting-current { font-size: 11px; color: #888; font-family: monospace; margin-top: 4px; }
+  .save-settings-btn { padding: 8px 20px; background: #5a7d6a; color: #fff; border: none; border-radius: 6px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .save-settings-btn:hover { background: #4a6a58; }
+
+  /* Hidden file input */
+  #fileInput { display: none; }
+
+  /* --- Learn panel (analysis) --- */
+  .learn-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(580px, 92vw); background: #faf8f5; border-left: 1px solid #e0dcd7; z-index: 51; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; box-shadow: -4px 0 24px rgba(0,0,0,0.08); }
+  .learn-panel.visible { transform: translateX(0); }
+  .learn-header { padding: 14px 18px; border-bottom: 1px solid #e8e4df; display: flex; justify-content: space-between; align-items: center; background: #fff; }
+  .learn-header h2 { font-size: 15px; font-weight: 600; color: #444; }
+  .learn-tabs { display: flex; gap: 0; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+  .learn-tab { padding: 6px 14px; border: none; background: #fff; font-family: inherit; font-size: 12px; cursor: pointer; color: #888; border-right: 1px solid #e8e4df; transition: all 0.15s; }
+  .learn-tab:last-child { border-right: none; }
+  .learn-tab.active { background: #5a7d6a; color: #fff; }
+  .learn-tab:hover:not(.active) { background: #f7f5f2; color: #555; }
+  .learn-body { flex: 1; overflow-y: auto; padding: 20px; }
+  .learn-body .loading-msg { text-align: center; color: #999; padding: 40px 0; }
+  .learn-body .loading-msg .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #ddd; border-top-color: #5a7d6a; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+  .learn-body .empty-msg { text-align: center; color: #bbb; padding: 40px 20px; font-style: italic; font-size: 14px; }
+  .learn-body .analyze-btn { display: block; margin: 20px auto 0; padding: 10px 28px; background: #5a7d6a; color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .learn-body .analyze-btn:hover { background: #4a6a58; }
+  .learn-body .analyze-btn:disabled { opacity: 0.5; cursor: default; }
+  .learn-content { font-size: 14px; line-height: 1.65; color: #444; }
+  .learn-content h2 { font-size: 16px; font-weight: 700; color: #333; margin: 20px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #e8e4df; }
+  .learn-content h2:first-child { margin-top: 0; }
+  .learn-content p { margin-bottom: 10px; }
+  .learn-content ul, .learn-content ol { margin-bottom: 10px; padding-left: 24px; }
+  .learn-content li { margin-bottom: 4px; }
+  .learn-content strong { color: #333; }
+  .learn-content code { font-family: monospace; background: #f0ede8; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+  .learn-timestamp { font-size: 11px; color: #bbb; text-align: right; margin-top: 16px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>Illustrated Explainer</h1>
+  <span class="page-counter" id="pageCounter"></span>
+  <div class="controls">
+    <button class="btn" id="backBtn" disabled>Back</button>
+    <button class="btn drill-btn" id="drillBtn" disabled>Drill In</button>
+    <button class="btn" id="resetBtn" disabled>Reset</button>
+    <button class="btn" id="learnBtn" disabled>Learn</button>
+    <button class="btn" id="galleryBtn">Gallery</button>
+    <button class="btn" id="settingsBtn">Models</button>
+  </div>
+</div>
+
+<div class="topic-area">
+  <form class="topic-form" id="topicForm">
+    <div class="mode-selector" id="modeSelector">
+      <button type="button" class="mode-btn active" data-mode="illustration">Illustration</button>
+      <button type="button" class="mode-btn" data-mode="historical_map">Historical Map</button>
+    </div>
+    <input class="topic-input" id="topicInput" type="text" placeholder="Type a topic... e.g. 'how volcanoes work'" maxlength="300" autofocus>
+    <button class="generate-btn" id="generateBtn" type="submit">Generate</button>
+    <button type="button" class="upload-btn" id="uploadBtn">Upload Image</button>
+    <input type="file" id="fileInput" accept="image/*">
+  </form>
+</div>
+
+<div class="error-banner" id="errorBanner"></div>
+
+<div class="canvas-area empty" id="canvasArea">
+  Type a topic above — or upload your own image to start drilling into it
+</div>
+
+<div class="thumbnail-strip hidden" id="thumbnailStrip"></div>
+
+<!-- Gallery panel -->
+<div class="panel-overlay" id="galleryOverlay"></div>
+<div class="slide-panel" id="galleryPanel">
+  <div class="panel-header"><h2>Generated Images</h2><button class="panel-close" id="galleryClose">&times;</button></div>
+  <div class="panel-body" id="galleryBody">Loading...</div>
+</div>
+
+<!-- Learn panel -->
+<div class="panel-overlay" id="learnOverlay"></div>
+<div class="learn-panel" id="learnPanel">
+  <div class="learn-header">
+    <h2>Learn About This Image</h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <div class="learn-tabs" id="learnTabs">
+        <button class="learn-tab active" data-tab="description">Description</button>
+        <button class="learn-tab" data-tab="explanation">Concepts</button>
+      </div>
+      <button class="panel-close" id="learnClose">&times;</button>
+    </div>
+  </div>
+  <div class="learn-body" id="learnBody"></div>
+</div>
+
+<!-- Settings panel -->
+<div class="panel-overlay" id="settingsOverlay"></div>
+<div class="slide-panel" id="settingsPanel">
+  <div class="panel-header"><h2>Model Settings</h2><button class="panel-close" id="settingsClose">&times;</button></div>
+  <div class="panel-body" id="settingsBody">Loading...</div>
+</div>
+
+<script>
+const state = {
+  pages: [],
+  currentIndex: -1,
+  loading: false,
+  drillMode: false,
+  mode: 'illustration',
+  pendingClick: null, // { x, y } — awaiting confirmation
+};
+
+const $ = id => document.getElementById(id);
+
+const PLACEHOLDERS = {
+  illustration: "Type a topic... e.g. 'how volcanoes work'",
+  historical_map: "Type a topic... e.g. 'Roman Empire at its peak'",
+};
+
+// --- Core functions ---
+
+function setLoading(loading) {
+  state.loading = loading;
+  $('topicInput').disabled = loading;
+  $('generateBtn').disabled = loading;
+  $('uploadBtn').disabled = loading;
+  document.querySelectorAll('.mode-btn').forEach(b => b.disabled = loading);
+  renderCurrentPage();
+  updateUI();
+}
+
+function showError(msg) { $('errorBanner').textContent = msg; $('errorBanner').classList.add('visible'); }
+function clearError() { $('errorBanner').classList.remove('visible'); }
+
+function updateUI() {
+  const { pages, currentIndex, loading } = state;
+  const hasPages = pages.length > 0;
+  $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
+  $('backBtn').disabled = currentIndex <= 0 || loading;
+  $('resetBtn').disabled = !hasPages || loading;
+  $('drillBtn').disabled = !hasPages || loading;
+  $('learnBtn').disabled = !hasPages || loading;
+  $('drillBtn').classList.toggle('active', state.drillMode);
+
+  if (hasPages) {
+    $('thumbnailStrip').classList.remove('hidden');
+    $('thumbnailStrip').innerHTML = '';
+    pages.forEach((page, i) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'thumb-index';
+      const img = document.createElement('img');
+      img.className = `thumb${i === currentIndex ? ' active' : ''}`;
+      img.src = page.imageUrl;
+      img.alt = `Page ${i + 1}`;
+      img.onclick = () => { if (!state.loading) { state.currentIndex = i; state.pendingClick = null; renderCurrentPage(); updateUI(); } };
+      const label = document.createElement('span');
+      label.textContent = i + 1;
+      wrapper.appendChild(img);
+      wrapper.appendChild(label);
+      $('thumbnailStrip').appendChild(wrapper);
+    });
+    const active = $('thumbnailStrip').querySelector('.thumb.active');
+    if (active) active.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  } else {
+    $('thumbnailStrip').classList.add('hidden');
+  }
+}
+
+function renderCurrentPage() {
+  const page = state.pages[state.currentIndex];
+  const canvas = $('canvasArea');
+  if (!page) {
+    canvas.className = 'canvas-area empty';
+    canvas.innerHTML = 'Type a topic above — or upload your own image to start drilling into it';
+    return;
+  }
+
+  canvas.className = 'canvas-area';
+  canvas.innerHTML = '';
+
+  const container = document.createElement('div');
+  container.className = `image-container${state.drillMode ? ' clickable' : ''}`;
+
+  const img = document.createElement('img');
+  img.src = page.imageUrl;
+  img.alt = 'Illustrated page';
+  img.draggable = false;
+
+  img.onclick = (e) => {
+    if (state.loading || !state.drillMode) return;
+    const rect = img.getBoundingClientRect();
+    const nx = (e.clientX - rect.left) / rect.width;
+    const ny = (e.clientY - rect.top) / rect.height;
+    // Set pending click — show marker and confirm bar
+    state.pendingClick = { x: nx, y: ny };
+    renderCurrentPage();
+    updateUI();
+  };
+
+  container.appendChild(img);
+
+  // Show the click marker if pending
+  if (state.pendingClick && !state.loading) {
+    const marker = document.createElement('div');
+    marker.className = 'click-marker';
+    // Wait for image to have dimensions
+    const placeMarker = () => {
+      const imgRect = img.getBoundingClientRect();
+      const contRect = container.getBoundingClientRect();
+      marker.style.left = `${state.pendingClick.x * imgRect.width + (imgRect.left - contRect.left)}px`;
+      marker.style.top = `${state.pendingClick.y * imgRect.height + (imgRect.top - contRect.top)}px`;
+    };
+    marker.innerHTML = '<div class="ring"></div><div class="dot"></div>';
+    container.appendChild(marker);
+    if (img.complete) placeMarker(); else img.onload = placeMarker;
+    requestAnimationFrame(placeMarker);
+
+    // Confirm bar
+    const bar = document.createElement('div');
+    bar.className = 'confirm-bar';
+    const goBtn = document.createElement('button');
+    goBtn.className = 'btn confirm-go';
+    goBtn.textContent = 'Drill here';
+    goBtn.onclick = () => {
+      const { x, y } = state.pendingClick;
+      state.pendingClick = null;
+      state.drillMode = false;
+      generateChildPage(page.id, x, y);
+    };
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => { state.pendingClick = null; renderCurrentPage(); };
+    bar.appendChild(goBtn);
+    bar.appendChild(cancelBtn);
+    container.appendChild(bar);
+  }
+
+  // Loading overlay
+  if (state.loading) {
+    const overlay = document.createElement('div');
+    overlay.className = 'loading-overlay';
+    overlay.innerHTML = '<div class="spinner"></div>Generating... (30–60 sec)';
+    container.appendChild(overlay);
+  }
+
+  canvas.appendChild(container);
+}
+
+// --- Generation ---
+
+async function generateFirstPage(query) {
+  clearError();
+  setLoading(true);
+  $('canvasArea').className = 'canvas-area generating';
+  const label = state.mode === 'historical_map' ? 'historical map' : 'illustration';
+  $('canvasArea').innerHTML = `<div class="spinner-large"></div>Generating ${label}... this takes 30–60 seconds`;
+
+  try {
+    const res = await fetch('/api/page', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, mode: state.mode }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
+    const { page } = await res.json();
+    state.pages = [page];
+    state.currentIndex = 0;
+    clearError();
+  } catch (err) { showError(err.message); }
+  finally { setLoading(false); }
+}
+
+async function generateChildPage(parentId, x, y) {
+  clearError();
+  setLoading(true);
+  try {
+    const res = await fetch('/api/page', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parentId, parentClick: { x, y } }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
+    const { page } = await res.json();
+    state.pages = state.pages.slice(0, state.currentIndex + 1);
+    state.pages.push(page);
+    state.currentIndex = state.pages.length - 1;
+    clearError();
+  } catch (err) { showError(err.message); }
+  finally { setLoading(false); }
+}
+
+// --- Upload ---
+
+async function uploadImage(file) {
+  const label = $('topicInput').value.trim() || file.name.replace(/\.\w+$/, '');
+  clearError();
+  setLoading(true);
+  $('canvasArea').className = 'canvas-area generating';
+  $('canvasArea').innerHTML = '<div class="spinner-large"></div>Processing upload...';
+
+  try {
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const res = await fetch('/api/upload', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageData: base64, label, mode: state.mode }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
+    const { page } = await res.json();
+    state.pages = [page];
+    state.currentIndex = 0;
+    clearError();
+  } catch (err) { showError(err.message); }
+  finally { setLoading(false); }
+}
+
+// --- Gallery ---
+
+function formatBytes(b) { return b < 1024 ? b + ' B' : b < 1048576 ? (b/1024).toFixed(0) + ' KB' : (b/1048576).toFixed(1) + ' MB'; }
+
+async function openGallery() {
+  $('galleryOverlay').classList.add('visible'); $('galleryPanel').classList.add('visible');
+  $('galleryBody').innerHTML = 'Loading...';
+  try {
+    const res = await fetch('/api/gallery');
+    const data = await res.json();
+    if (data.folders.length === 0) { $('galleryBody').innerHTML = '<p style="color:#999;font-style:italic">No images yet.</p>'; return; }
+    let html = `<div class="gallery-base-path">${data.generatedDir}</div>`;
+    for (const f of data.folders) {
+      const isMap = f.mode === 'historical_map';
+      html += `<div class="gallery-folder"><div class="gallery-folder-header"><span class="gallery-folder-title">${f.query}</span><span class="gallery-folder-meta"><span class="mode-tag${isMap?' map':''}">${isMap?'map':'illustration'}</span>${f.imageCount} images<span>${formatBytes(f.totalSize)}</span></span></div>`;
+      html += `<div class="gallery-folder-path">${f.path}</div><div class="gallery-images">`;
+      for (const img of f.images) {
+        html += `<div class="gallery-img-card" onclick="window.open('${img.url}','_blank')"><img src="${img.url}" loading="lazy"><div class="gallery-img-meta"><span>${img.id.slice(0,8)}...</span><span>${formatBytes(img.size)}</span></div></div>`;
+      }
+      html += '</div></div>';
+    }
+    $('galleryBody').innerHTML = html;
+  } catch (err) { $('galleryBody').innerHTML = `<p style="color:#b91c1c">Error: ${err.message}</p>`; }
+}
+
+// --- Settings ---
+
+async function openSettings() {
+  $('settingsOverlay').classList.add('visible'); $('settingsPanel').classList.add('visible');
+  $('settingsBody').innerHTML = 'Loading...';
+  try {
+    const res = await fetch('/api/models');
+    const { current, registry } = await res.json();
+
+    function optionsFor(capability) {
+      let html = '';
+      for (const [pid, prov] of Object.entries(registry)) {
+        for (const m of prov.models) {
+          if (m.capabilities.includes(capability)) {
+            html += `<option value="${pid}/${m.id}">${prov.name} — ${m.name}</option>`;
+          }
+        }
+      }
+      return html;
+    }
+
+    $('settingsBody').innerHTML = `
+      <div class="setting-group">
+        <label>Image Generation Model</label>
+        <p class="desc">Used when generating the first page from a text prompt.</p>
+        <select class="setting-select" id="genModelSelect">${optionsFor('generation')}</select>
+        <p class="setting-current">Current: ${current.generation.provider}/${current.generation.model}</p>
+      </div>
+      <div class="setting-group">
+        <label>Image Editing Model</label>
+        <p class="desc">Used when drilling into an existing image (image + prompt → new image).</p>
+        <select class="setting-select" id="editModelSelect">${optionsFor('editing')}</select>
+        <p class="setting-current">Current: ${current.editing.provider}/${current.editing.model}</p>
+      </div>
+      <div class="setting-group">
+        <label>Image Analysis Model</label>
+        <p class="desc">Used by the Learn feature to generate descriptions and concept explanations. Local models are free. Falls back to Grok if the local model lacks vision support.</p>
+        <select class="setting-select" id="analysisModelSelect">${optionsFor('analysis')}</select>
+        <p class="setting-current">Current: ${current.analysis.provider}/${current.analysis.model}</p>
+      </div>
+      <div class="setting-group">
+        <p class="desc">To add new providers (Gemini, OpenAI, etc.), add them to MODEL_REGISTRY in server.js and set the corresponding API key in .env.</p>
+      </div>
+      <button class="save-settings-btn" id="saveSettingsBtn">Save</button>
+    `;
+
+    $('genModelSelect').value = `${current.generation.provider}/${current.generation.model}`;
+    $('editModelSelect').value = `${current.editing.provider}/${current.editing.model}`;
+    $('analysisModelSelect').value = `${current.analysis.provider}/${current.analysis.model}`;
+
+    $('saveSettingsBtn').onclick = async () => {
+      const [gProv, gModel] = $('genModelSelect').value.split('/');
+      const [eProv, eModel] = $('editModelSelect').value.split('/');
+      const [aProv, aModel] = $('analysisModelSelect').value.split('/');
+      const r = await fetch('/api/models', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          generation: { provider: gProv, model: gModel },
+          editing: { provider: eProv, model: eModel },
+          analysis: { provider: aProv, model: aModel },
+        }),
+      });
+      if (r.ok) { closePanel('settings'); } else { const d = await r.json(); showError(d.error); }
+    };
+  } catch (err) { $('settingsBody').innerHTML = `<p style="color:#b91c1c">Error: ${err.message}</p>`; }
+}
+
+// --- Learn / Analysis ---
+
+let learnCache = {}; // pageId -> { description, explanation }
+let learnActiveTab = 'description';
+let learnAnalyzing = false;
+
+function simpleMarkdown(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^- \*\*(.+?)\*\*:\s?(.*)$/gm, '<li><strong>$1</strong>: $2</li>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/\n{2,}/g, '</p><p>')
+    .replace(/^(?!<[hlu])/gm, function(m) { return m; })
+    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+    .replace(/\n/g, '<br>');
+}
+
+async function openLearn() {
+  const page = state.pages[state.currentIndex];
+  if (!page) return;
+
+  $('learnOverlay').classList.add('visible');
+  $('learnPanel').classList.add('visible');
+
+  // Load cached analysis
+  if (!learnCache[page.id]) {
+    try {
+      const res = await fetch(`/api/analysis/${page.id}`);
+      learnCache[page.id] = await res.json();
+    } catch { learnCache[page.id] = { description: null, explanation: null }; }
+  }
+
+  renderLearnTab();
+}
+
+function renderLearnTab() {
+  const page = state.pages[state.currentIndex];
+  if (!page) return;
+  const data = learnCache[page.id] || {};
+  const body = $('learnBody');
+
+  // Update tab active state
+  document.querySelectorAll('.learn-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === learnActiveTab));
+
+  const content = learnActiveTab === 'description' ? data.description : data.explanation;
+  const timestamp = learnActiveTab === 'description' ? data.descriptionAt : data.explanationAt;
+
+  if (learnAnalyzing) {
+    body.innerHTML = `<div class="loading-msg"><span class="spinner"></span>Analyzing image with local Gemma model... this may take 30–90 seconds</div>`;
+    return;
+  }
+
+  if (content) {
+    const source = learnActiveTab === 'description' ? data.descriptionSource : data.explanationSource;
+    const sourceLabel = source === 'grok' ? 'via Grok API' : 'via local Gemma';
+    body.innerHTML = `<div class="learn-content">${simpleMarkdown(content)}</div>` +
+      (timestamp ? `<div class="learn-timestamp">Analyzed ${new Date(timestamp).toLocaleString()} (${sourceLabel})</div>` : '');
+    return;
+  }
+
+  // Not yet analyzed
+  const label = learnActiveTab === 'description' ? 'image description' : 'concept explanation';
+  body.innerHTML = `<div class="empty-msg">No ${label} yet.<br>Analyzes using your local Gemma model if vision is available, otherwise falls back to Grok API.</div>` +
+    `<button class="analyze-btn" id="analyzeBtn">Analyze ${learnActiveTab === 'description' ? 'Image' : 'Concepts'}</button>` +
+    `<button class="analyze-btn" id="analyzeBothBtn" style="background:#6b5a3e;margin-top:8px;">Analyze Both at Once</button>`;
+
+  $('analyzeBtn').onclick = () => runAnalysis(page.id, learnActiveTab);
+  $('analyzeBothBtn').onclick = () => runAnalysis(page.id, 'both');
+}
+
+async function runAnalysis(pageId, type) {
+  learnAnalyzing = true;
+  renderLearnTab();
+
+  try {
+    const res = await fetch(`/api/analysis/${pageId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type }),
+    });
+    const data = await res.json();
+    if (data.error && !data.description && !data.explanation) {
+      showError(data.error);
+    }
+    learnCache[pageId] = data;
+  } catch (err) {
+    showError('Analysis failed: ' + err.message);
+  } finally {
+    learnAnalyzing = false;
+    renderLearnTab();
+  }
+}
+
+function closePanel(name) {
+  $(name + 'Overlay').classList.remove('visible');
+  $(name + 'Panel').classList.remove('visible');
+}
+
+// --- Event listeners ---
+
+$('topicForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const query = $('topicInput').value.trim();
+  if (!query || state.loading) return;
+  generateFirstPage(query);
+});
+
+$('modeSelector').addEventListener('click', (e) => {
+  const btn = e.target.closest('.mode-btn');
+  if (!btn || state.loading) return;
+  const newMode = btn.dataset.mode;
+  if (newMode === state.mode) return;
+  state.mode = newMode;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === newMode);
+    if (b.dataset.mode === 'historical_map') b.classList.toggle('map-mode', b.dataset.mode === newMode);
+  });
+  $('topicInput').placeholder = PLACEHOLDERS[newMode] || PLACEHOLDERS.illustration;
+});
+
+$('drillBtn').addEventListener('click', () => {
+  if (!state.loading && state.pages.length > 0) {
+    state.drillMode = !state.drillMode;
+    state.pendingClick = null;
+    renderCurrentPage();
+    updateUI();
+  }
+});
+
+$('backBtn').addEventListener('click', () => {
+  if (state.currentIndex > 0 && !state.loading) {
+    state.currentIndex--;
+    state.pendingClick = null;
+    renderCurrentPage();
+    updateUI();
+  }
+});
+
+$('resetBtn').addEventListener('click', () => {
+  if (!state.loading) {
+    state.pages = []; state.currentIndex = -1; state.pendingClick = null; state.drillMode = false;
+    $('topicInput').value = '';
+    $('topicInput').focus();
+    renderCurrentPage(); updateUI(); clearError();
+  }
+});
+
+$('uploadBtn').addEventListener('click', () => { if (!state.loading) $('fileInput').click(); });
+$('fileInput').addEventListener('change', (e) => { if (e.target.files[0]) { uploadImage(e.target.files[0]); e.target.value = ''; } });
+
+$('learnBtn').addEventListener('click', openLearn);
+$('learnClose').addEventListener('click', () => closePanel('learn'));
+$('learnOverlay').addEventListener('click', () => closePanel('learn'));
+$('learnTabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('.learn-tab');
+  if (!tab) return;
+  learnActiveTab = tab.dataset.tab;
+  renderLearnTab();
+});
+
+$('galleryBtn').addEventListener('click', openGallery);
+$('galleryClose').addEventListener('click', () => closePanel('gallery'));
+$('galleryOverlay').addEventListener('click', () => closePanel('gallery'));
+
+$('settingsBtn').addEventListener('click', openSettings);
+$('settingsClose').addEventListener('click', () => closePanel('settings'));
+$('settingsOverlay').addEventListener('click', () => closePanel('settings'));
+
+updateUI();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "generation": {
+    "provider": "openai",
+    "model": "gpt-image-2"
+  },
+  "editing": {
+    "provider": "openai",
+    "model": "gpt-image-2"
+  },
+  "analysis": {
+    "provider": "local",
+    "model": "auto"
+  }
+}

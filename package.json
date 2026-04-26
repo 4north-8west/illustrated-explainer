@@ -1,0 +1,15 @@
+{
+  "name": "illustrated-explainer",
+  "version": "1.0.0",
+  "description": "Infinite drill-down illustrated explainer powered by Grok",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "sharp": "^0.33.5"
+  }
+}
