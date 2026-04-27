@@ -60,7 +60,7 @@
   @keyframes marker-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }
 
   /* Confirm bar */
-  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: minmax(220px, 1fr) auto auto auto; gap: 8px; z-index: 6; background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; width: min(760px, calc(100vw - 48px)); }
+  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: minmax(220px, 1fr) auto auto auto auto; gap: 8px; z-index: 6; background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; width: min(840px, calc(100vw - 48px)); }
   .confirm-intent { min-width: 0; padding: 6px 10px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 13px; outline: none; }
   .confirm-intent:focus { border-color: #999; }
   .confirm-bar .btn { font-size: 13px; padding: 6px 18px; }
@@ -68,6 +68,8 @@
   .confirm-bar .btn.confirm-go:hover { background: #4a6a58; }
   .confirm-bar .btn.confirm-text { background: #6b5a3e; color: #fff; border-color: #6b5a3e; }
   .confirm-bar .btn.confirm-text:hover { background: #58492f; }
+  .confirm-bar .btn.confirm-chart { background: #496a7a; color: #fff; border-color: #496a7a; }
+  .confirm-bar .btn.confirm-chart:hover { background: #385665; }
   @media (max-width: 720px) {
     .confirm-bar { grid-template-columns: 1fr 1fr; }
     .confirm-intent { grid-column: 1 / -1; }
@@ -106,6 +108,10 @@
   .text-page-content mjx-container,
   .learn-content mjx-container { font-size: 105%; }
   .text-page-source { margin-top: 18px; font-size: 11px; color: #aaa; text-align: right; }
+  .chart-page { width: min(900px, 100%); max-height: calc(100vh - 260px); overflow-y: auto; background: #fff; border: 1px solid #e8e4df; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); padding: 24px 28px; }
+  .chart-page svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart-notes { margin: 14px 0 0 18px; font-size: 13px; line-height: 1.5; color: #555; }
+  .chart-uncertainty { margin-top: 12px; font-size: 12px; color: #8a6d3b; background: #fff8e8; border: 1px solid #f0dfb8; border-radius: 6px; padding: 8px 10px; }
 
   /* --- Slide panels (gallery, settings) --- */
   .panel-overlay { display: none; position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.3); }
@@ -266,6 +272,7 @@ const state = {
   loading: false,
   drillMode: false,
   mode: 'illustration',
+  modes: [],
   pendingClick: null, // { x, y } — awaiting confirmation
 };
 
@@ -294,12 +301,103 @@ function normalizeMathText(text) {
     .replace(/([,.;:])\s*\$(\s+)/g, '$1$2');
 }
 
-const PLACEHOLDERS = {
-  illustration: "Type a topic... e.g. 'how volcanoes work'",
-  historical_map: "Type a topic... e.g. 'Roman Empire at its peak'",
-};
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function chartSvg(chart) {
+  const spec = chart || {};
+  const points = Array.isArray(spec.points) ? spec.points.filter(p => Number.isFinite(Number(p.y))) : [];
+  const safePoints = points.length ? points : [{ label: 'No data', x: 0, y: 0 }];
+  const w = 820, h = 430;
+  const m = { top: 46, right: 34, bottom: 76, left: 76 };
+  const plotW = w - m.left - m.right;
+  const plotH = h - m.top - m.bottom;
+  const ys = safePoints.map(p => Number(p.y));
+  const xs = safePoints.map((p, i) => Number.isFinite(Number(p.x)) ? Number(p.x) : i);
+  const minY = Math.min(0, ...ys);
+  const maxY = Math.max(1, ...ys);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(minX + 1, ...xs);
+  const yScale = y => m.top + plotH - ((y - minY) / (maxY - minY || 1)) * plotH;
+  const xScale = (x, i) => spec.type === 'bar'
+    ? m.left + (i + 0.5) * (plotW / safePoints.length)
+    : m.left + ((x - minX) / (maxX - minX || 1)) * plotW;
+  const axis = `<line x1="${m.left}" y1="${m.top}" x2="${m.left}" y2="${m.top + plotH}" stroke="#333"/><line x1="${m.left}" y1="${m.top + plotH}" x2="${m.left + plotW}" y2="${m.top + plotH}" stroke="#333"/>`;
+  const yTicks = Array.from({ length: 5 }, (_, i) => minY + (i * (maxY - minY) / 4)).map(v => {
+    const y = yScale(v);
+    return `<line x1="${m.left - 5}" y1="${y}" x2="${m.left + plotW}" y2="${y}" stroke="#eee"/><text x="${m.left - 10}" y="${y + 4}" text-anchor="end" font-size="12" fill="#666">${escapeHtml(v.toFixed(1).replace(/\.0$/, ''))}</text>`;
+  }).join('');
+  const xLabels = safePoints.map((p, i) => {
+    if (safePoints.length > 12 && i % Math.ceil(safePoints.length / 10) !== 0) return '';
+    const x = xScale(xs[i], i);
+    return `<text x="${x}" y="${m.top + plotH + 22}" text-anchor="middle" font-size="11" fill="#666">${escapeHtml(String(p.label ?? xs[i]).slice(0, 14))}</text>`;
+  }).join('');
+
+  let marks = '';
+  if (spec.type === 'bar') {
+    const band = plotW / safePoints.length;
+    marks = safePoints.map((p, i) => {
+      const y = yScale(Number(p.y));
+      const base = yScale(0);
+      const x = m.left + i * band + band * 0.18;
+      return `<rect x="${x}" y="${Math.min(y, base)}" width="${band * 0.64}" height="${Math.abs(base - y)}" fill="#5a7d6a"/><title>${escapeHtml(p.label)}: ${escapeHtml(p.y)}</title>`;
+    }).join('');
+  } else {
+    const path = safePoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xScale(xs[i], i)} ${yScale(Number(p.y))}`).join(' ');
+    marks = `<path d="${path}" fill="none" stroke="#496a7a" stroke-width="3"/>` + safePoints.map((p, i) => `<circle cx="${xScale(xs[i], i)}" cy="${yScale(Number(p.y))}" r="${spec.type === 'scatter' ? 5 : 4}" fill="#5a7d6a"><title>${escapeHtml(p.label)}: ${escapeHtml(p.y)}</title></circle>`).join('');
+  }
+
+  return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${escapeHtml(spec.title || 'Chart')}">
+    <text x="${w / 2}" y="24" text-anchor="middle" font-size="20" font-weight="700" fill="#333">${escapeHtml(spec.title || 'Chart')}</text>
+    ${yTicks}${axis}${marks}${xLabels}
+    <text x="${w / 2}" y="${h - 18}" text-anchor="middle" font-size="13" fill="#555">${escapeHtml(spec.xLabel || 'x')}</text>
+    <text transform="translate(18 ${h / 2}) rotate(-90)" text-anchor="middle" font-size="13" fill="#555">${escapeHtml(spec.yLabel || 'y')}</text>
+  </svg>`;
+}
 
 // --- Core functions ---
+
+function currentModeConfig() {
+  return state.modes.find(m => m.id === state.mode) || state.modes[0] || {
+    id: 'illustration',
+    label: 'Illustration',
+    tagLabel: 'illustration',
+    placeholder: "Type a topic... e.g. 'how volcanoes work'",
+  };
+}
+
+function renderModeSelector() {
+  const selector = $('modeSelector');
+  if (!selector || state.modes.length === 0) return;
+  selector.innerHTML = '';
+  for (const mode of state.modes) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `mode-btn${mode.id === state.mode ? ' active' : ''}`;
+    btn.dataset.mode = mode.id;
+    btn.textContent = mode.label;
+    btn.title = mode.description || mode.label;
+    btn.disabled = state.loading;
+    selector.appendChild(btn);
+  }
+  $('topicInput').placeholder = currentModeConfig().placeholder;
+}
+
+async function loadModes() {
+  try {
+    const res = await fetch('/api/modes');
+    if (!res.ok) throw new Error(`Error ${res.status}`);
+    const data = await res.json();
+    state.modes = data.modes || [];
+    state.mode = state.modes.some(m => m.id === state.mode) ? state.mode : data.defaultMode;
+    renderModeSelector();
+  } catch (err) {
+    console.warn('Failed to load modes:', err);
+    state.modes = [currentModeConfig()];
+    renderModeSelector();
+  }
+}
 
 function setLoading(loading) {
   state.loading = loading;
@@ -322,8 +420,8 @@ function updateUI() {
   $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
   $('backBtn').disabled = currentIndex <= 0 || loading;
   $('resetBtn').disabled = !hasPages || loading;
-  $('drillBtn').disabled = !hasPages || loading || pages[currentIndex]?.type === 'markdown';
-  $('learnBtn').disabled = !hasPages || loading || pages[currentIndex]?.type === 'markdown';
+  $('drillBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
+  $('learnBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
   $('drillBtn').classList.toggle('active', state.drillMode);
 
   if (hasPages) {
@@ -333,11 +431,11 @@ function updateUI() {
       const wrapper = document.createElement('div');
       wrapper.className = 'thumb-index';
       let thumb;
-      if (page.type === 'markdown') {
+      if (page.type === 'markdown' || page.type === 'chart') {
         thumb = document.createElement('div');
         thumb.className = `text-thumb${i === currentIndex ? ' active' : ''}`;
-        thumb.textContent = 'T';
-        thumb.title = page.title || 'Text page';
+        thumb.textContent = page.type === 'chart' ? 'C' : 'T';
+        thumb.title = page.title || (page.type === 'chart' ? 'Chart page' : 'Text page');
       } else {
         thumb = document.createElement('img');
         thumb.className = `thumb${i === currentIndex ? ' active' : ''}`;
@@ -383,6 +481,29 @@ function renderCurrentPage() {
     `;
     canvas.appendChild(article);
     renderMath(article);
+    return;
+  }
+
+  if (page.type === 'chart') {
+    const article = document.createElement('article');
+    article.className = 'chart-page';
+    const notes = page.chart?.notes?.length
+      ? `<ul class="chart-notes">${page.chart.notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>`
+      : '';
+    const uncertainty = page.chart?.uncertainty
+      ? `<div class="chart-uncertainty">${escapeHtml(page.chart.uncertainty)}</div>`
+      : '';
+    article.innerHTML = `
+      <div class="text-page-header">
+        <div class="text-page-title">${escapeHtml(page.title || page.chart?.title || 'Chart drill-down')}</div>
+        <div class="text-page-kind">Chart response</div>
+      </div>
+      ${chartSvg(page.chart || {})}
+      ${notes}
+      ${uncertainty}
+      ${page.source ? `<div class="text-page-source">Generated via ${escapeHtml(page.source)}</div>` : ''}
+    `;
+    canvas.appendChild(article);
     return;
   }
 
@@ -453,6 +574,16 @@ function renderCurrentPage() {
       state.drillMode = false;
       generateChildPage(page.id, x, y, 'markdown', intent);
     };
+    const chartBtn = document.createElement('button');
+    chartBtn.className = 'btn confirm-chart';
+    chartBtn.textContent = 'Chart';
+    chartBtn.onclick = () => {
+      const { x, y } = state.pendingClick;
+      const intent = intentInput.value.trim();
+      state.pendingClick = null;
+      state.drillMode = false;
+      generateChildPage(page.id, x, y, 'chart', intent);
+    };
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn';
     cancelBtn.textContent = 'Cancel';
@@ -460,6 +591,7 @@ function renderCurrentPage() {
     bar.appendChild(intentInput);
     bar.appendChild(goBtn);
     bar.appendChild(textBtn);
+    bar.appendChild(chartBtn);
     bar.appendChild(cancelBtn);
     container.appendChild(bar);
     requestAnimationFrame(() => intentInput.focus());
@@ -482,7 +614,7 @@ async function generateFirstPage(query) {
   clearError();
   setLoading(true);
   $('canvasArea').className = 'canvas-area generating';
-  const label = state.mode === 'historical_map' ? 'historical map' : 'illustration';
+  const label = currentModeConfig().tagLabel || currentModeConfig().label.toLowerCase();
   $('canvasArea').innerHTML = `<div class="spinner-large"></div>Generating ${label}... this takes 30–60 seconds`;
 
   try {
@@ -585,8 +717,9 @@ async function openGallery() {
     if (data.folders.length === 0) { $('galleryBody').innerHTML = '<p style="color:#999;font-style:italic">No images yet.</p>'; return; }
     let html = `<div class="gallery-base-path">${data.generatedDir}</div>`;
     for (const f of data.folders) {
-      const isMap = f.mode === 'historical_map';
-      html += `<div class="gallery-folder"><div class="gallery-folder-header"><span class="gallery-folder-title">${escapeHtml(f.query)}</span><span class="gallery-folder-meta"><span class="mode-tag${isMap?' map':''}">${isMap?'map':'illustration'}</span>${f.imageCount} images${f.textCount ? ` · ${f.textCount} text` : ''}<span>${formatBytes(f.totalSize)}</span></span></div>`;
+      const modeConfig = state.modes.find(m => m.id === f.mode);
+      const tag = modeConfig?.tagLabel || f.mode || 'illustration';
+      html += `<div class="gallery-folder"><div class="gallery-folder-header"><span class="gallery-folder-title">${escapeHtml(f.query)}</span><span class="gallery-folder-meta"><span class="mode-tag">${escapeHtml(tag)}</span>${f.imageCount} images${f.textCount ? ` · ${f.textCount} text` : ''}<span>${formatBytes(f.totalSize)}</span></span></div>`;
       html += `<div class="gallery-folder-path">${f.path}</div><div class="gallery-images">`;
       for (const img of f.images) {
         html += `<div class="gallery-img-card" onclick="window.open('${img.url}','_blank')"><img src="${img.url}" loading="lazy"><div class="gallery-img-meta"><span>${img.id.slice(0,8)}...</span><span>${formatBytes(img.size)}</span></div></div>`;
@@ -793,9 +926,8 @@ $('modeSelector').addEventListener('click', (e) => {
   state.mode = newMode;
   document.querySelectorAll('.mode-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.mode === newMode);
-    if (b.dataset.mode === 'historical_map') b.classList.toggle('map-mode', b.dataset.mode === newMode);
   });
-  $('topicInput').placeholder = PLACEHOLDERS[newMode] || PLACEHOLDERS.illustration;
+  $('topicInput').placeholder = currentModeConfig().placeholder;
 });
 
 $('drillBtn').addEventListener('click', () => {
@@ -846,7 +978,7 @@ $('settingsBtn').addEventListener('click', openSettings);
 $('settingsClose').addEventListener('click', () => closePanel('settings'));
 $('settingsOverlay').addEventListener('click', () => closePanel('settings'));
 
-updateUI();
+loadModes().finally(updateUI);
 </script>
 </body>
 </html>

@@ -1,0 +1,11 @@
+{
+  "id": "math_equation",
+  "label": "Math",
+  "tagLabel": "math",
+  "placeholder": "Type a concept... e.g. 'Euler-Lagrange equation'",
+  "description": "Mathematical explainers that emphasize readable notation, visual intuition, and step-by-step structure.",
+  "style": "Mathematical explainer style (must remain consistent across every page):\n- Clean white or warm paper background with generous margins\n- Crisp dark ink, readable mathematical notation, and sparse color accents\n- Use diagrams, axes, geometric constructions, annotations, and callouts where helpful\n- Equations must be large, legible, and typeset-like, not tiny handwriting\n- Use muted blue, green, gold, and red accents to connect formulas to visual elements\n- A clear title at the top center\n\nStrict exclusions:\n- No dense walls of tiny text\n- No decorative chalkboard, neon, or dark classroom themes\n- No illegible pseudo-symbols or fake equations\n- No photorealistic calculators, laptops, or app UI cards",
+  "firstPageTemplate": "{{style}}\n\nSubject: {{query}}\n\nCreate a single 16:9 mathematical explainer page about the subject above.\nChoose the best visual form: equation map, geometric interpretation, graph,\nworked example, proof sketch, or variable relationship diagram. Make the\nmain equation or relationship central and readable, with labels that explain\nwhat each important term means.\n\nOutput a single PNG image, 16:9. Print the title clearly inside the image.",
+  "childPageTemplate": "{{style}}\n\nYou are continuing a mathematical explainer.\nThe provided image is the previous page. A red circle marks the exact\nsymbol, term, graph region, proof step, or diagram component the reader selected.\n\nGenerate the next page: a single 16:9 mathematical explainer that goes deeper\ninto the marked region. If the mark is on a variable, explain what changing it does.\nIf it is on an operator, show the operation visually. If it is on a proof step,\nexpand the substeps. If it is on a graph feature, connect the visual feature to\nthe formula.\n\nKeep equations large and readable. Use visuals to connect notation to meaning.\nDo NOT include the red circle or cursor mark in the output.\n\nOutput a single PNG image, 16:9.",
+  "modeLabelForPrompt": "mathematical explainer"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "illustration",
+  "label": "Illustration",
+  "tagLabel": "illustration",
+  "placeholder": "Type a topic... e.g. 'how volcanoes work'",
+  "description": "General illustrated explainer pages with a consistent hand-drawn watercolor style.",
+  "style": "Painting style (must remain consistent across every page):\n- Light warm paper background with generous margins\n- Clean, even dark gray or black ink outlines, consistent thin line weight\n- Soft watercolor washes, pale palette: ivory, pale green, pale blue, light gray, with restrained warm accents\n- A large serif title printed at the top center of the image\n- Calm, well-composed scene with breathing room\n\nStrict exclusions:\n- No decorative borders, seals, parchment aging, ornate fonts, or vintage texture\n- No 3D render, photorealism, neon, dark themes, or modern app UI cards\n- No dense paragraphs of text, watermarks, or tiny unreadable labels\n- No tourist map roads, landmarks, transit, or \"traveler-guide\" framing",
+  "firstPageTemplate": "{{style}}\n\nSubject: {{query}}\n\nCompose a single 16:9 illustrated explainer page about the subject above.\nLet the scene's content (objects, layout, metaphor) be whatever best\nexplains the subject - cross-section, exploded view, timeline, anatomy,\nflow, comparison, or scene - chosen to fit this specific topic.\n\nOutput a single PNG image, 16:9. Print the title clearly inside the image.",
+  "childPageTemplate": "{{style}}\n\nYou are continuing an illustrated explainer book.\nThe provided image is the previous page. A red circle marks\nthe area the reader pointed at.\n\nGenerate the next page: a single 16:9 image that goes deeper\ninto whatever the red circle is on - zoom in, expand its inner\nstructure, or show its mechanism.\n\nCritical: match the painting style of the provided image exactly\n- same line weight, same paper tone, same pastel palette, same\ntitle typography. The two pages must feel like consecutive spreads\nin the same hand-drawn book.\n\nDo NOT include the red circle or any cursor mark in the output.\n\nOutput a single PNG image, 16:9.",
+  "modeLabelForPrompt": "illustrated explainer"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "science_process",
+  "label": "Science",
+  "tagLabel": "science",
+  "placeholder": "Type a process... e.g. 'photosynthesis'",
+  "description": "Science explainers for mechanisms, scales, systems, reactions, and processes.",
+  "style": "Science process explainer style (must remain consistent across every page):\n- Clean light background with precise ink outlines and soft educational color\n- Use cutaways, layered diagrams, flow arrows, scale transitions, and labeled parts\n- Labels should be concise, large enough to read, and attached to visible structures\n- Use color to distinguish components, energy, matter, inputs, outputs, and sequence\n- A clear title at the top center\n\nStrict exclusions:\n- No photorealistic lab scenes unless the subject requires it\n- No dense paragraphs or tiny labels\n- No dark sci-fi UI, neon overlays, or 3D render look\n- No decorative clutter unrelated to the mechanism",
+  "firstPageTemplate": "{{style}}\n\nSubject: {{query}}\n\nCreate a single 16:9 science explainer page about the subject above.\nChoose the best representation: process diagram, anatomy/cutaway, reaction path,\nscale ladder, system map, or cause-and-effect flow. Show the main components,\ninputs, outputs, and relationships clearly.\n\nOutput a single PNG image, 16:9. Print the title clearly inside the image.",
+  "childPageTemplate": "{{style}}\n\nYou are continuing a science explainer.\nThe provided image is the previous page. A red circle marks the component,\narrow, label, molecule, cell part, force, or process step the reader selected.\n\nGenerate the next page: a single 16:9 science explainer that goes deeper into\nthe marked region. If it is a structure, show the smaller-scale internal parts.\nIf it is a process arrow, show intermediate steps. If it is an energy or matter\nlabel, show where it comes from and where it goes.\n\nKeep the same visual style. Do NOT include the red circle or cursor mark in the output.\n\nOutput a single PNG image, 16:9.",
+  "modeLabelForPrompt": "science explainer"
+}

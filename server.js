@@ -144,9 +144,9 @@ function uploadContextPageId(pageId) {
   return hash(`upload-context${CACHE_VERSION}${pageId}`);
 }
 
-// --- Style descriptions per mode ---
+// --- Mode templates ---
 
-const MODES = {
+const FALLBACK_MODES = {
   illustration: {
     style: `Painting style (must remain consistent across every page):
 - Light warm paper background with generous margins
@@ -256,7 +256,72 @@ Output a single PNG image, 16:9.`,
   },
 };
 
-const VALID_MODES = Object.keys(MODES);
+const MODES_DIR = path.join(__dirname, 'modes');
+
+function renderTemplate(template, values) {
+  return String(template || '').replace(/\{\{(\w+)\}\}/g, (_match, key) => values[key] ?? '');
+}
+
+function normalizeModeConfig(mode, fallbackId = null) {
+  const id = mode.id || fallbackId;
+  if (!id || !/^[a-z0-9_]+$/.test(id)) throw new Error(`Invalid mode id: ${id}`);
+  if (!mode.style) throw new Error(`Mode ${id} is missing style`);
+
+  const firstPageTemplate = mode.firstPageTemplate || (mode.firstPagePrompt ? mode.firstPagePrompt('{{query}}', '{{style}}') : null);
+  const childPageTemplate = mode.childPageTemplate || (mode.childPagePrompt ? mode.childPagePrompt('{{style}}') : null);
+  if (!firstPageTemplate || !childPageTemplate) throw new Error(`Mode ${id} is missing prompt templates`);
+
+  return {
+    id,
+    label: mode.label || id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+    tagLabel: mode.tagLabel || id.replace(/_/g, ' '),
+    placeholder: mode.placeholder || "Type a topic...",
+    description: mode.description || '',
+    style: mode.style,
+    firstPageTemplate,
+    childPageTemplate,
+    modeLabelForPrompt: mode.modeLabelForPrompt || mode.label || id.replace(/_/g, ' '),
+  };
+}
+
+function loadModes() {
+  const modes = {};
+  for (const [id, mode] of Object.entries(FALLBACK_MODES)) {
+    modes[id] = normalizeModeConfig({ ...mode, id }, id);
+  }
+
+  try {
+    const entries = fs.readdirSync(MODES_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const filePath = path.join(MODES_DIR, entry.name);
+      try {
+        const loaded = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const mode = normalizeModeConfig(loaded, path.basename(entry.name, '.json'));
+        modes[mode.id] = mode;
+      } catch (err) {
+        console.warn(`[modes] Skipping ${filePath}: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    console.warn(`[modes] Using fallback modes only: ${err.message}`);
+  }
+
+  return modes;
+}
+
+let MODES = loadModes();
+let VALID_MODES = Object.keys(MODES);
+
+function publicMode(mode) {
+  return {
+    id: mode.id,
+    label: mode.label,
+    tagLabel: mode.tagLabel,
+    placeholder: mode.placeholder,
+    description: mode.description,
+  };
+}
 
 // --- Red marker compositing ---
 
@@ -277,6 +342,75 @@ async function compositeRedMarker(imagePath, nx, ny) {
 
   return await sharp(imagePath)
     .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+}
+
+async function compositeFocusImage(imagePath, nx, ny) {
+  const metadata = await sharp(imagePath).metadata();
+  const w = metadata.width;
+  const h = metadata.height;
+  const cx = Math.round(nx * w);
+  const cy = Math.round(ny * h);
+  const cropSize = Math.round(Math.min(w, h) * 0.38);
+  const cropW = Math.min(w, cropSize);
+  const cropH = Math.min(h, cropSize);
+  const left = Math.round(Math.max(0, Math.min(w - cropW, cx - cropW / 2)));
+  const top = Math.round(Math.max(0, Math.min(h - cropH, cy - cropH / 2)));
+  const cropCenterX = cx - left;
+  const cropCenterY = cy - top;
+
+  const markerSvg = (width, height, x, y, label) => {
+    const radius = Math.round(Math.min(width, height) * 0.08);
+    const innerRadius = Math.max(6, Math.round(radius * 0.28));
+    return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="${width}" height="34" fill="rgba(255,255,255,0.88)"/>
+      <text x="14" y="23" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#333">${label}</text>
+      <line x1="${x - radius * 1.35}" y1="${y}" x2="${x + radius * 1.35}" y2="${y}" stroke="rgba(220,0,0,0.95)" stroke-width="5"/>
+      <line x1="${x}" y1="${y - radius * 1.35}" x2="${x}" y2="${y + radius * 1.35}" stroke="rgba(220,0,0,0.95)" stroke-width="5"/>
+      <circle cx="${x}" cy="${y}" r="${radius}" fill="rgba(255,0,0,0.20)" stroke="rgba(220,0,0,1)" stroke-width="6"/>
+      <circle cx="${x}" cy="${y}" r="${innerRadius}" fill="rgba(220,0,0,1)"/>
+    </svg>`;
+  };
+
+  const fullPanel = await sharp(imagePath)
+    .resize(900, 720, { fit: 'inside', background: '#faf8f5' })
+    .extend({ top: 0, bottom: 0, left: 0, right: 0, background: '#faf8f5' })
+    .toBuffer();
+  const fullMeta = await sharp(fullPanel).metadata();
+  const fullScale = Math.min(fullMeta.width / w, fullMeta.height / h);
+  const fullX = Math.round(cx * fullScale);
+  const fullY = Math.round(cy * fullScale);
+  const markedFull = await sharp(fullPanel)
+    .composite([{ input: Buffer.from(markerSvg(fullMeta.width, fullMeta.height, fullX, fullY, 'FULL IMAGE - CLICK MARKED')), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+
+  const cropPanel = await sharp(imagePath)
+    .extract({ left, top, width: cropW, height: cropH })
+    .resize(900, 720, { fit: 'inside', background: '#faf8f5' })
+    .toBuffer();
+  const cropMeta = await sharp(cropPanel).metadata();
+  const cropScale = Math.min(cropMeta.width / cropW, cropMeta.height / cropH);
+  const cropX = Math.round(cropCenterX * cropScale);
+  const cropY = Math.round(cropCenterY * cropScale);
+  const markedCrop = await sharp(cropPanel)
+    .composite([{ input: Buffer.from(markerSvg(cropMeta.width, cropMeta.height, cropX, cropY, 'ZOOMED CLICK REGION - ANSWER ABOUT THIS')), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+
+  return sharp({
+    create: {
+      width: 1840,
+      height: 760,
+      channels: 4,
+      background: '#faf8f5',
+    },
+  })
+    .composite([
+      { input: markedFull, left: 10, top: 20 },
+      { input: markedCrop, left: 930, top: 20 },
+    ])
     .png()
     .toBuffer();
 }
@@ -438,7 +572,7 @@ async function callEditing(prompt, imageBuffer) {
 
 async function generateFirstPage(query, mode) {
   const modeConfig = MODES[mode];
-  const prompt = modeConfig.firstPagePrompt(query, modeConfig.style);
+  const prompt = renderTemplate(modeConfig.firstPageTemplate, { style: modeConfig.style, query });
   return callGeneration(prompt);
 }
 
@@ -451,7 +585,7 @@ async function generateChildPage(compositedImageBuffer, mode, intent = '', conte
   const sourcePrompt = uploadContext?.content
     ? `\n\nSource upload analysis for context:\n${uploadContext.content.slice(0, 2500)}`
     : '';
-  const prompt = modeConfig.childPagePrompt(modeConfig.style) + intentPrompt + sourcePrompt;
+  const prompt = renderTemplate(modeConfig.childPageTemplate, { style: modeConfig.style }) + intentPrompt + sourcePrompt;
   return callEditing(prompt, compositedImageBuffer);
 }
 
@@ -511,7 +645,7 @@ function findNearestUploadContext(pageId) {
 
 async function generateTextDrillPage(compositedImageBuffer, mode, intent, contextTrail) {
   const imageBase64 = compositedImageBuffer.toString('base64');
-  const modeLabel = mode === 'historical_map' ? 'historical map' : 'illustrated explainer';
+  const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
   const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
   const contextText = contextTrail.map((item, index) => {
     const step = index + 1;
@@ -522,8 +656,12 @@ async function generateTextDrillPage(compositedImageBuffer, mode, intent, contex
     ? `\n\nSource upload analysis:\n${uploadContext.content.slice(0, 5000)}`
     : '';
 
-  const systemPrompt = `You are an expert STEM-capable educator. Explain the exact marked region in an image clearly and accurately. Prefer precise text, equations, tables, or concise examples over generating another image. Use Markdown. If math is needed, use valid LaTeX with inline math in $...$ and display math in $$...$$.`;
-  const userPrompt = `The image includes a red marker showing what the learner clicked in a ${modeLabel}.
+  const systemPrompt = `You are an expert STEM-capable educator. Explain only the exact selected region in an image, not the image as a whole. Prefer precise text, equations, tables, or concise examples over generating another image. Use Markdown. If math is needed, use valid LaTeX with inline math in $...$ and display math in $$...$$.`;
+  const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
+
+Focus your answer on the feature at the center of the right zoomed panel. Use the full left panel only for context.
+
+The learner clicked this region in a ${modeLabel}.
 
 Learner intent: ${intent || 'Explain what is marked and why it matters.'}
 
@@ -532,12 +670,12 @@ ${contextText || 'No prior context available.'}${uploadContextText}
 
 Respond with a focused Markdown learning page:
 - Start with a short title.
-- Identify what the marked region appears to be.
+- Identify what the center of the right zoomed region appears to be.
 - Answer the learner intent directly.
 - Include equations, definitions, or small tables when they help.
 - Put important equations on their own lines using $$...$$.
 - Mention uncertainty explicitly if the image does not provide enough information.
-- Do not describe the red marker itself except to identify the selected region.`;
+- Do not explain unrelated areas of the image.`;
 
   const cfg = modelConfig.analysis;
   try {
@@ -552,7 +690,107 @@ Respond with a focused Markdown learning page:
   }
 }
 
+function parseJsonResponse(text) {
+  const raw = String(text || '').trim();
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const jsonText = fenced ? fenced[1].trim() : raw;
+  const start = jsonText.indexOf('{');
+  const end = jsonText.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) throw new Error('No JSON object found in model response');
+  return JSON.parse(jsonText.slice(start, end + 1));
+}
+
+function normalizeChartSpec(spec) {
+  const chart = spec && typeof spec === 'object' ? spec : {};
+  const type = ['line', 'bar', 'scatter'].includes(chart.type) ? chart.type : 'line';
+  const points = Array.isArray(chart.points) ? chart.points
+    .map((point, index) => ({
+      label: String(point.label ?? point.x ?? index + 1),
+      x: Number.isFinite(Number(point.x)) ? Number(point.x) : index,
+      y: Number.isFinite(Number(point.y)) ? Number(point.y) : 0,
+    }))
+    .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .slice(0, 80) : [];
+
+  return {
+    type,
+    title: String(chart.title || 'Chart drill-down').slice(0, 120),
+    xLabel: String(chart.xLabel || 'x').slice(0, 80),
+    yLabel: String(chart.yLabel || 'y').slice(0, 80),
+    points,
+    notes: Array.isArray(chart.notes) ? chart.notes.map(note => String(note).slice(0, 240)).slice(0, 6) : [],
+    uncertainty: String(chart.uncertainty || '').slice(0, 500),
+  };
+}
+
+async function generateChartDrillPage(compositedImageBuffer, mode, intent, contextTrail) {
+  const imageBase64 = compositedImageBuffer.toString('base64');
+  const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
+  const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
+  const contextText = contextTrail.map((item, index) => {
+    const step = index + 1;
+    const intentText = item.intent ? ` Intent: ${item.intent}` : '';
+    return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
+  }).join('\n');
+  const uploadContextText = uploadContext?.content
+    ? `\n\nSource upload analysis:\n${uploadContext.content.slice(0, 5000)}`
+    : '';
+
+  const systemPrompt = `You convert only the exact selected image region into a simple educational chart specification. Return JSON only. Use inferred or approximate values only when the selected region and context support them, and describe uncertainty.`;
+  const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
+
+Focus on the feature at the center of the right zoomed panel. Use the full left panel only for context.
+
+The learner clicked this region in a ${modeLabel}.
+
+Learner intent: ${intent || 'Turn the marked region into a useful chart or graph if appropriate.'}
+
+Drill-down context:
+${contextText || 'No prior context available.'}${uploadContextText}
+
+Return one JSON object only, with this shape:
+{
+  "type": "line" | "bar" | "scatter",
+  "title": "short chart title",
+  "xLabel": "x axis label",
+  "yLabel": "y axis label",
+  "points": [
+    { "label": "visible label", "x": 0, "y": 0 }
+  ],
+  "notes": ["short teaching note"],
+  "uncertainty": "what is inferred or approximate"
+}
+
+Rules:
+- Use 2-20 points unless the image clearly supports more.
+- If the marked region is not numeric data, make a conceptual sequence chart using ordinal x values.
+- Do not invent precision. Prefer simple approximate values and clear uncertainty.`;
+
+  const cfg = modelConfig.analysis;
+  let result;
+  try {
+    result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
+  } catch (err) {
+    if (cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
+      result = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
+      const chart = normalizeChartSpec(parseJsonResponse(result));
+      return { chart, source: 'grok (fallback)' };
+    }
+    throw err;
+  }
+
+  const chart = normalizeChartSpec(parseJsonResponse(result));
+  return { chart, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
+}
+
 // --- Model config API ---
+
+app.get('/api/modes', (_req, res) => {
+  res.json({
+    modes: VALID_MODES.map(id => publicMode(MODES[id])),
+    defaultMode: VALID_MODES.includes('illustration') ? 'illustration' : VALID_MODES[0],
+  });
+});
 
 app.get('/api/models', (_req, res) => {
   const registry = {};
@@ -739,7 +977,7 @@ app.post('/api/context/:pageId', async (req, res) => {
 
 app.post('/api/page', async (req, res) => {
   const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind } = req.body;
-  const responseKind = reqResponseKind === 'markdown' ? 'markdown' : 'image';
+  const responseKind = ['markdown', 'chart'].includes(reqResponseKind) ? reqResponseKind : 'image';
   const intent = typeof reqIntent === 'string' ? reqIntent.trim().slice(0, 500) : '';
 
   const isFirst = typeof query === 'string';
@@ -815,6 +1053,9 @@ app.post('/api/page', async (req, res) => {
         if (!fs.existsSync(parentPath)) throw new Error('Parent image not found');
         console.log(`[${mode}] Generating child page: ${parentId} @ (${parentClickData.x}, ${parentClickData.y}) -> ${folder}/${id}`);
         const composited = await compositeRedMarker(parentPath, parentClick.x, parentClick.y);
+        const focusedComposite = responseKind === 'markdown' || responseKind === 'chart'
+          ? await compositeFocusImage(parentPath, parentClick.x, parentClick.y)
+          : null;
         const contextTrail = buildContextTrail(parentId);
         if (responseKind === 'markdown') {
           const textPath = pageJsonPath(folder, id);
@@ -822,7 +1063,7 @@ app.post('/api/page', async (req, res) => {
             const cached = loadPageContent(folder, id);
             if (cached) return cached;
           }
-          const result = await generateTextDrillPage(composited, mode, intent, contextTrail);
+          const result = await generateTextDrillPage(focusedComposite, mode, intent, contextTrail);
           const page = {
             id,
             type: 'markdown',
@@ -839,6 +1080,31 @@ app.post('/api/page', async (req, res) => {
           pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'markdown', parentId, parentClick: parentClickData, intent };
           saveMetadata(pageMeta);
           console.log(`Saved: ${textPath}`);
+          return page;
+        }
+        if (responseKind === 'chart') {
+          const chartPath = pageJsonPath(folder, id);
+          if (fs.existsSync(chartPath)) {
+            const cached = loadPageContent(folder, id);
+            if (cached) return cached;
+          }
+          const result = await generateChartDrillPage(focusedComposite, mode, intent, contextTrail);
+          const page = {
+            id,
+            type: 'chart',
+            title: result.chart.title || intent || 'Chart drill-down',
+            chart: result.chart,
+            source: result.source,
+            parentId: parentPageId,
+            parentClick: parentClickData,
+            initialQuery,
+            mode,
+            intent,
+          };
+          savePageContent(folder, id, page);
+          pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'chart', parentId, parentClick: parentClickData, intent };
+          saveMetadata(pageMeta);
+          console.log(`Saved: ${chartPath}`);
           return page;
         }
         imageBuffer = await generateChildPage(composited, mode, intent, contextTrail);
