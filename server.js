@@ -48,6 +48,7 @@ let pageMeta = loadMetadata();
 // --- Model configuration (persisted) ---
 
 const DEFAULT_MODEL_CONFIG = {
+  localOnly: false,
   generation: { provider: 'xai', model: 'grok-imagine-image' },
   editing: { provider: 'xai', model: 'grok-imagine-image' },
   analysis: { provider: 'local', model: 'auto' },
@@ -63,6 +64,12 @@ function saveModelConfig(config) {
 }
 
 let modelConfig = loadModelConfig();
+
+function enforceLocalOnly(provider, capability) {
+  if (modelConfig.localOnly && provider !== 'local') {
+    throw new Error(`Keep it local is enabled. ${capability} is blocked until a local ${capability.toLowerCase()} model is configured.`);
+  }
+}
 
 // Available models registry — add new providers/models here
 const MODEL_REGISTRY = {
@@ -131,8 +138,8 @@ function firstPageId(query, mode) {
   return hash(`first${CACHE_VERSION}${mode}${normalize(query)}`);
 }
 
-function childPageId(parentId, x, y, responseKind = 'image', intent = '') {
-  return hash(`child${CACHE_VERSION}${responseKind}${parentId}${x.toFixed(2)}${y.toFixed(2)}${normalize(intent)}`);
+function childPageId(parentId, x, y, responseKind = 'image', intent = '', responseDepth = 'explain', language = '') {
+  return hash(`child${CACHE_VERSION}${responseKind}${parentId}${x.toFixed(2)}${y.toFixed(2)}${normalize(intent)}${responseDepth}${normalize(language)}`);
 }
 
 function uploadPageId(buffer, label) {
@@ -465,6 +472,11 @@ async function callGeminiGenerate(model, prompt, referenceImageBase64) {
 async function callGeneration(prompt) {
   const cfg = modelConfig.generation;
   const provider = MODEL_REGISTRY[cfg.provider];
+  enforceLocalOnly(cfg.provider, 'Image generation');
+
+  if (!provider?.generationUrl && cfg.provider !== 'gemini') {
+    throw new Error(`No local image generation model is configured yet. Disable "keep it local" or add a local generation provider.`);
+  }
 
   if (cfg.provider === 'gemini') {
     return callGeminiGenerate(cfg.model, prompt, null);
@@ -508,6 +520,11 @@ async function callGeneration(prompt) {
 async function callEditing(prompt, imageBuffer) {
   const cfg = modelConfig.editing;
   const provider = MODEL_REGISTRY[cfg.provider];
+  enforceLocalOnly(cfg.provider, 'Image editing');
+
+  if (!provider?.editingUrl && cfg.provider !== 'gemini') {
+    throw new Error(`No local image editing model is configured yet. Disable "keep it local" or add a local editing provider.`);
+  }
 
   if (cfg.provider === 'gemini') {
     const base64Image = imageBuffer.toString('base64');
@@ -589,6 +606,19 @@ async function generateChildPage(compositedImageBuffer, mode, intent = '', conte
   return callEditing(prompt, compositedImageBuffer);
 }
 
+function responseDepthInstruction(responseDepth, language = '') {
+  const languageInstruction = language
+    ? `\nLanguage: respond in ${language}. Preserve formulas, code, variable names, and exact source quotations where needed.`
+    : '';
+  if (responseDepth === 'extract') {
+    return `Response mode: Extract. Return what is visibly present in the selected region as literally as possible. Minimize interpretation. If a translation language is requested, include both "Original extraction" and "Translation".${languageInstruction}`;
+  }
+  if (responseDepth === 'teach') {
+    return `Response mode: Teach concepts. Use the selected region as the starting point, then teach the broader concepts needed to understand it. Stay grounded in the selected region.${languageInstruction}`;
+  }
+  return `Response mode: Explain here. Explain the selected region specifically in the context of this image or document. Do not drift to unrelated concepts.${languageInstruction}`;
+}
+
 function pageJsonPath(folder, id) {
   return path.join(GENERATED_DIR, folder, `${id}.json`);
 }
@@ -643,7 +673,7 @@ function findNearestUploadContext(pageId) {
   return null;
 }
 
-async function generateTextDrillPage(compositedImageBuffer, mode, intent, contextTrail) {
+async function generateTextDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
   const imageBase64 = compositedImageBuffer.toString('base64');
   const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
   const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
@@ -664,6 +694,8 @@ Focus your answer on the feature at the center of the right zoomed panel. Use th
 The learner clicked this region in a ${modeLabel}.
 
 Learner intent: ${intent || 'Explain what is marked and why it matters.'}
+
+${responseDepthInstruction(responseDepth, language)}
 
 Drill-down context:
 ${contextText || 'No prior context available.'}${uploadContextText}
@@ -723,7 +755,7 @@ function normalizeChartSpec(spec) {
   };
 }
 
-async function generateChartDrillPage(compositedImageBuffer, mode, intent, contextTrail) {
+async function generateChartDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
   const imageBase64 = compositedImageBuffer.toString('base64');
   const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
   const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
@@ -744,6 +776,8 @@ Focus on the feature at the center of the right zoomed panel. Use the full left 
 The learner clicked this region in a ${modeLabel}.
 
 Learner intent: ${intent || 'Turn the marked region into a useful chart or graph if appropriate.'}
+
+${responseDepthInstruction(responseDepth, language)}
 
 Drill-down context:
 ${contextText || 'No prior context available.'}${uploadContextText}
@@ -806,7 +840,8 @@ app.get('/api/models', (_req, res) => {
 });
 
 app.post('/api/models', (req, res) => {
-  const { generation, editing, analysis } = req.body;
+  const { generation, editing, analysis, localOnly } = req.body;
+  if (typeof localOnly === 'boolean') modelConfig.localOnly = localOnly;
   for (const [key, val] of [['generation', generation], ['editing', editing], ['analysis', analysis]]) {
     if (val) {
       if (!MODEL_REGISTRY[val.provider]?.models[val.model]) {
@@ -911,9 +946,7 @@ Describe the spatial layout and important regions from top to bottom and left to
 
 ## Key Concepts
 List the main concepts, variables, relationships, or data patterns the learner is likely working with.
-
-## Suggested Drill Targets
-List 4-8 specific regions a learner might click, with what each drill-down should explain.`;
+`;
 
   const result = await analyzeImage(imageBase64, systemPrompt, userPrompt);
   const page = {
@@ -954,7 +987,7 @@ app.get('/api/context/:pageId', (req, res) => {
   const meta = pageMeta[pageId];
   if (!meta) return res.status(404).json({ error: 'Page not found in metadata' });
   const contextId = meta.contextPageId || (meta.type === 'upload_context' ? pageId : null);
-  const context = contextId ? loadPageContent(meta.folder, contextId) : null;
+  const context = contextId ? loadPageContent(meta.folder, contextId) : findNearestUploadContext(pageId);
   res.json({ page: context });
 });
 
@@ -973,12 +1006,160 @@ app.post('/api/context/:pageId', async (req, res) => {
   }
 });
 
+async function callTextChat(provider, model, systemPrompt, userPrompt) {
+  enforceLocalOnly(provider, 'Text analysis');
+  const providerConfig = MODEL_REGISTRY[provider];
+  if (provider === 'gemini') {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ parts: [{ text: userPrompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
+      }),
+      signal: AbortSignal.timeout(180000),
+    });
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Gemini error ${response.status}: ${err.slice(0, 200)}`);
+    }
+    const data = await response.json();
+    const textParts = data.candidates?.[0]?.content?.parts?.filter(p => p.text) || [];
+    return textParts.map(p => p.text).join('\n');
+  }
+
+  if (!providerConfig?.chatUrl) throw new Error(`No chat URL for provider: ${provider}`);
+  const headers = { 'Content-Type': 'application/json' };
+  const auth = providerConfig.authHeader();
+  if (auth) headers['Authorization'] = auth;
+  const response = await fetch(providerConfig.chatUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ...(provider !== 'local' ? { model } : {}),
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 4096,
+    }),
+    signal: AbortSignal.timeout(180000),
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`${provider} error ${response.status}: ${err.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+async function translatePageContent(page, language) {
+  const cfg = modelConfig.analysis;
+  const sourceName = cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`;
+  const systemPrompt = `Translate educational content accurately. Preserve Markdown structure, LaTeX, formulas, code, variable names, numeric values, and proper nouns unless a standard translation exists.`;
+  const chartText = page.type === 'chart'
+    ? `Chart title: ${page.chart?.title || page.title}\nX label: ${page.chart?.xLabel || ''}\nY label: ${page.chart?.yLabel || ''}\nNotes:\n${(page.chart?.notes || []).map(n => `- ${n}`).join('\n')}\nUncertainty: ${page.chart?.uncertainty || ''}`
+    : page.content || '';
+  const userPrompt = `Translate the following content into ${language}. Return Markdown only.\n\n${chartText}`;
+  try {
+    const text = await callTextChat(cfg.provider, cfg.model, systemPrompt, userPrompt);
+    return { text, source: sourceName };
+  } catch (err) {
+    if (!modelConfig.localOnly && cfg.provider === 'local' && err.message.includes('ECONNREFUSED')) {
+      const text = await callTextChat('xai', 'grok-4-1-fast-non-reasoning', systemPrompt, userPrompt);
+      return { text, source: 'grok (fallback)' };
+    }
+    throw err;
+  }
+}
+
+app.post('/api/translate/:pageId', async (req, res) => {
+  const { pageId } = req.params;
+  const language = typeof req.body?.language === 'string' ? req.body.language.trim().slice(0, 80) : '';
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) return res.status(400).json({ error: 'Invalid page ID' });
+  if (!language) return res.status(400).json({ error: 'Language is required' });
+  const sourcePage = pageFromMetadata(pageId);
+  const sourceMeta = pageMeta[pageId];
+  if (!sourcePage || !sourceMeta) return res.status(404).json({ error: 'Page not found' });
+  if (!['markdown', 'chart', 'upload_context'].includes(sourceMeta.type)) {
+    return res.status(400).json({ error: 'Only text, chart, and context pages can be translated' });
+  }
+
+  try {
+    const id = hash(`translate${CACHE_VERSION}${pageId}${normalize(language)}`);
+    const cached = loadPageContent(sourceMeta.folder, id);
+    if (cached) return res.json({ page: cached });
+    const result = await translatePageContent(sourcePage, language);
+    const page = {
+      id,
+      type: 'markdown',
+      title: `${sourcePage.title || 'Page'} (${language})`,
+      content: result.text,
+      source: result.source,
+      parentId: pageId,
+      parentClick: null,
+      initialQuery: sourceMeta.query,
+      mode: sourceMeta.mode,
+      intent: `Translate to ${language}`,
+      responseDepth: 'translate',
+      language,
+    };
+    savePageContent(sourceMeta.folder, id, page);
+    pageMeta[id] = { folder: sourceMeta.folder, query: sourceMeta.query, mode: sourceMeta.mode, type: 'markdown', parentId: pageId, parentClick: null, intent: page.intent, language };
+    saveMetadata(pageMeta);
+    res.json({ page });
+  } catch (err) {
+    console.error('Translation error:', err.message);
+    res.status(500).json({ error: `Translation failed: ${err.message}` });
+  }
+});
+
 // --- Page generation API ---
 
+function pageFromMetadata(pageId) {
+  const meta = pageMeta[pageId];
+  if (!meta) return null;
+
+  if (meta.type === 'markdown' || meta.type === 'chart' || meta.type === 'upload_context') {
+    const content = loadPageContent(meta.folder, pageId);
+    if (!content) return null;
+    return content;
+  }
+
+  const imagePath = path.join(GENERATED_DIR, meta.folder, `${pageId}.png`);
+  if (!fs.existsSync(imagePath)) return null;
+  return {
+    id: pageId,
+    type: 'image',
+    imageUrl: `/generated/${meta.folder}/${pageId}.png`,
+    parentId: meta.parentId || null,
+    parentClick: meta.parentClick || null,
+    initialQuery: meta.query || null,
+    mode: meta.mode || 'illustration',
+    intent: meta.intent || '',
+    contextPageId: meta.contextPageId || null,
+  };
+}
+
+app.get('/api/page/:pageId', (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
+    return res.status(400).json({ error: 'Invalid page ID' });
+  }
+  const page = pageFromMetadata(pageId);
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  res.json({ page });
+});
+
 app.post('/api/page', async (req, res) => {
-  const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind } = req.body;
+  const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind, responseDepth: reqResponseDepth, language: reqLanguage } = req.body;
   const responseKind = ['markdown', 'chart'].includes(reqResponseKind) ? reqResponseKind : 'image';
   const intent = typeof reqIntent === 'string' ? reqIntent.trim().slice(0, 500) : '';
+  const responseDepth = ['extract', 'explain', 'teach'].includes(reqResponseDepth) ? reqResponseDepth : 'explain';
+  const language = typeof reqLanguage === 'string' ? reqLanguage.trim().slice(0, 80) : '';
 
   const isFirst = typeof query === 'string';
   const isChild = typeof parentId === 'string' && parentClick && typeof parentClick.x === 'number' && typeof parentClick.y === 'number';
@@ -1025,7 +1206,7 @@ app.post('/api/page', async (req, res) => {
       } else {
         const rx = Math.round(parentClick.x * 100) / 100;
         const ry = Math.round(parentClick.y * 100) / 100;
-        id = childPageId(parentId, rx, ry, responseKind, intent);
+        id = childPageId(parentId, rx, ry, responseKind, intent, responseDepth, language);
         parentPageId = parentId;
         parentClickData = { x: rx, y: ry };
         const parentMeta = pageMeta[parentId];
@@ -1063,7 +1244,7 @@ app.post('/api/page', async (req, res) => {
             const cached = loadPageContent(folder, id);
             if (cached) return cached;
           }
-          const result = await generateTextDrillPage(focusedComposite, mode, intent, contextTrail);
+          const result = await generateTextDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language);
           const page = {
             id,
             type: 'markdown',
@@ -1075,9 +1256,11 @@ app.post('/api/page', async (req, res) => {
             initialQuery,
             mode,
             intent,
+            responseDepth,
+            language,
           };
           savePageContent(folder, id, page);
-          pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'markdown', parentId, parentClick: parentClickData, intent };
+          pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'markdown', parentId, parentClick: parentClickData, intent, responseDepth, language };
           saveMetadata(pageMeta);
           console.log(`Saved: ${textPath}`);
           return page;
@@ -1088,7 +1271,7 @@ app.post('/api/page', async (req, res) => {
             const cached = loadPageContent(folder, id);
             if (cached) return cached;
           }
-          const result = await generateChartDrillPage(focusedComposite, mode, intent, contextTrail);
+          const result = await generateChartDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language);
           const page = {
             id,
             type: 'chart',
@@ -1100,9 +1283,11 @@ app.post('/api/page', async (req, res) => {
             initialQuery,
             mode,
             intent,
+            responseDepth,
+            language,
           };
           savePageContent(folder, id, page);
-          pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'chart', parentId, parentClick: parentClickData, intent };
+          pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'chart', parentId, parentClick: parentClickData, intent, responseDepth, language };
           saveMetadata(pageMeta);
           console.log(`Saved: ${chartPath}`);
           return page;
@@ -1143,6 +1328,7 @@ function saveAnalysis(pageId, data) {
 }
 
 async function callVisionChat(provider, model, imageBase64, systemPrompt, userPrompt) {
+  enforceLocalOnly(provider, 'Vision analysis');
   const providerConfig = MODEL_REGISTRY[provider];
 
   // Gemini uses its own API format
@@ -1220,7 +1406,7 @@ async function analyzeImage(imageBase64, systemPrompt, userPrompt) {
     const text = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
     return { text, source: sourceName };
   } catch (err) {
-    if (cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
+    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
       // Fallback to Grok
       console.log(`[analysis] Local model unavailable (${err.message}), falling back to Grok...`);
       const text = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);

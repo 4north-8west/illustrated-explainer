@@ -60,9 +60,10 @@
   @keyframes marker-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }
 
   /* Confirm bar */
-  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: minmax(220px, 1fr) auto auto auto auto; gap: 8px; z-index: 6; background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; width: min(840px, calc(100vw - 48px)); }
+  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: minmax(220px, 1fr) 130px 130px auto auto auto auto; gap: 8px; z-index: 6; background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; width: min(1120px, calc(100vw - 48px)); }
   .confirm-intent { min-width: 0; padding: 6px 10px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 13px; outline: none; }
   .confirm-intent:focus { border-color: #999; }
+  .confirm-select, .confirm-language { min-width: 0; padding: 6px 9px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 12px; background: #fff; color: #555; }
   .confirm-bar .btn { font-size: 13px; padding: 6px 18px; }
   .confirm-bar .btn.confirm-go { background: #5a7d6a; color: #fff; border-color: #5a7d6a; }
   .confirm-bar .btn.confirm-go:hover { background: #4a6a58; }
@@ -72,7 +73,7 @@
   .confirm-bar .btn.confirm-chart:hover { background: #385665; }
   @media (max-width: 720px) {
     .confirm-bar { grid-template-columns: 1fr 1fr; }
-    .confirm-intent { grid-column: 1 / -1; }
+    .confirm-intent, .confirm-select, .confirm-language { grid-column: 1 / -1; }
   }
 
   /* --- Error banner --- */
@@ -108,6 +109,10 @@
   .text-page-content mjx-container,
   .learn-content mjx-container { font-size: 105%; }
   .text-page-source { margin-top: 18px; font-size: 11px; color: #aaa; text-align: right; }
+  .renderer-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .renderer-action-btn { padding: 4px 9px; border: 1px solid #d5d0ca; border-radius: 5px; background: #fff; color: #555; font-family: inherit; font-size: 11px; cursor: pointer; }
+  .renderer-action-btn:hover { background: #f7f5f2; border-color: #aaa; }
+  .renderer-language { width: 110px; padding: 4px 7px; border: 1px solid #d5d0ca; border-radius: 5px; font-family: inherit; font-size: 11px; }
   .chart-page { width: min(900px, 100%); max-height: calc(100vh - 260px); overflow-y: auto; background: #fff; border: 1px solid #e8e4df; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); padding: 24px 28px; }
   .chart-page svg { display: block; width: 100%; height: auto; overflow: visible; }
   .chart-notes { margin: 14px 0 0 18px; font-size: 13px; line-height: 1.5; color: #555; }
@@ -142,6 +147,8 @@
   .gallery-text-card { border-radius: 4px; border: 1px solid #e8e4df; background: #fff; padding: 8px 10px; }
   .gallery-text-title { font-size: 12px; font-weight: 600; color: #4b4032; line-height: 1.3; margin-bottom: 5px; }
   .gallery-text-meta { font-size: 9px; color: #999; font-family: monospace; display: flex; justify-content: space-between; gap: 8px; }
+  .gallery-open-folder { padding: 3px 8px; border: 1px solid #d5d0ca; border-radius: 5px; background: #fff; font-family: inherit; font-size: 10px; color: #555; cursor: pointer; }
+  .gallery-open-folder:hover { background: #f0ede8; }
 
   /* Settings panel */
   .setting-group { margin-bottom: 20px; }
@@ -149,6 +156,10 @@
   .setting-group .desc { font-size: 11px; color: #999; margin-bottom: 8px; }
   .setting-select { width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-family: inherit; font-size: 13px; background: #fff; }
   .setting-current { font-size: 11px; color: #888; font-family: monospace; margin-top: 4px; }
+  .setting-group label.setting-checkbox { display: flex; gap: 9px; align-items: flex-start; padding: 10px 12px; border: 1px solid #e0dcd7; border-radius: 6px; background: #fff; margin-bottom: 0; }
+  .setting-checkbox input { margin-top: 2px; }
+  .setting-checkbox span { display: block; font-size: 13px; font-weight: 600; color: #444; }
+  .setting-checkbox small { display: block; margin-top: 3px; font-size: 11px; line-height: 1.35; color: #888; }
   .save-settings-btn { padding: 8px 20px; background: #5a7d6a; color: #fff; border: none; border-radius: 6px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
   .save-settings-btn:hover { background: #4a6a58; }
 
@@ -207,6 +218,7 @@
     <button class="btn" id="backBtn" disabled>Back</button>
     <button class="btn drill-btn" id="drillBtn" disabled>Drill In</button>
     <button class="btn" id="resetBtn" disabled>Reset</button>
+    <button class="btn" id="contextBtn" disabled>Context</button>
     <button class="btn" id="learnBtn" disabled>Learn</button>
     <button class="btn" id="galleryBtn">Gallery</button>
     <button class="btn" id="settingsBtn">Models</button>
@@ -242,6 +254,16 @@
   <div class="panel-body" id="galleryBody">Loading...</div>
 </div>
 
+<!-- Context panel -->
+<div class="panel-overlay" id="contextOverlay"></div>
+<div class="learn-panel" id="contextPanel">
+  <div class="learn-header">
+    <h2>Source Context</h2>
+    <button class="panel-close" id="contextClose">&times;</button>
+  </div>
+  <div class="learn-body" id="contextBody"></div>
+</div>
+
 <!-- Learn panel -->
 <div class="panel-overlay" id="learnOverlay"></div>
 <div class="learn-panel" id="learnPanel">
@@ -273,10 +295,13 @@ const state = {
   drillMode: false,
   mode: 'illustration',
   modes: [],
+  responseDepth: 'explain',
+  language: '',
   pendingClick: null, // { x, y } — awaiting confirmation
 };
 
 const $ = id => document.getElementById(id);
+const SESSION_KEY = 'illustratedExplainer.session.v1';
 
 function escapeHtml(text) {
   return String(text)
@@ -414,12 +439,110 @@ function clearError() { $('errorBanner').classList.remove('visible'); }
 function showStatus(msg) { $('statusNote').innerHTML = `<span class="spinner"></span>${escapeHtml(msg)}`; $('statusNote').style.display = 'flex'; }
 function clearStatus() { $('statusNote').style.display = 'none'; $('statusNote').innerHTML = ''; }
 
+function rendererActions(page) {
+  const language = escapeHtml(state.language || '');
+  const canTranslate = page.type === 'markdown' || page.type === 'chart';
+  const translate = canTranslate
+    ? `<input class="renderer-language" id="rendererLanguage" placeholder="Language" value="${language}"><button class="renderer-action-btn" id="translatePageBtn">Translate</button>`
+    : '';
+  const removable = state.pages.length > 1
+    ? `<button class="renderer-action-btn" id="removePageBtn">Remove</button>`
+    : '';
+  return `<div class="renderer-actions">${translate}${removable}</div>`;
+}
+
+function bindRendererActions(page) {
+  const translateBtn = $('translatePageBtn');
+  if (translateBtn) {
+    translateBtn.onclick = () => {
+      const language = $('rendererLanguage')?.value.trim();
+      if (language) {
+        state.language = language;
+        translateCurrentPage(language);
+      }
+    };
+  }
+  const removeBtn = $('removePageBtn');
+  if (removeBtn) removeBtn.onclick = () => removeCurrentPage();
+}
+
+function removeCurrentPage() {
+  if (state.pages.length <= 1 || state.currentIndex < 0) return;
+  state.pages.splice(state.currentIndex, 1);
+  state.currentIndex = clamp(state.currentIndex, 0, state.pages.length - 1);
+  state.pendingClick = null;
+  state.drillMode = false;
+  renderCurrentPage();
+  updateUI();
+  saveSession();
+}
+
+function saveSession() {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      pageIds: state.pages.map(p => p.id),
+      currentIndex: state.currentIndex,
+      mode: state.mode,
+      responseDepth: state.responseDepth,
+      language: state.language,
+      savedAt: new Date().toISOString(),
+    }));
+  } catch (err) {
+    console.warn('Failed to save session:', err);
+  }
+}
+
+async function fetchSavedPage(pageId) {
+  const res = await fetch(`/api/page/${pageId}`);
+  if (!res.ok) return null;
+  const { page } = await res.json();
+  return page;
+}
+
+async function restoreSession() {
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+  } catch {
+    return;
+  }
+  if (!saved?.pageIds?.length) return;
+
+  showStatus('Restoring last exploration...');
+  try {
+    const pages = [];
+    for (const id of saved.pageIds) {
+      if (!/^[a-f0-9]{16}$/.test(id)) continue;
+      const page = await fetchSavedPage(id);
+      if (page) pages.push(page);
+    }
+    if (pages.length) {
+      state.pages = pages;
+      state.currentIndex = clamp(Number(saved.currentIndex) || 0, 0, pages.length - 1);
+      if (saved.mode && state.modes.some(m => m.id === saved.mode)) state.mode = saved.mode;
+      if (['extract', 'explain', 'teach'].includes(saved.responseDepth)) state.responseDepth = saved.responseDepth;
+      if (typeof saved.language === 'string') state.language = saved.language.slice(0, 80);
+      state.pendingClick = null;
+      state.drillMode = false;
+      renderModeSelector();
+      $('topicInput').placeholder = currentModeConfig().placeholder;
+      renderCurrentPage();
+      updateUI();
+    }
+  } catch (err) {
+    console.warn('Failed to restore session:', err);
+  } finally {
+    clearStatus();
+  }
+}
+
 function updateUI() {
   const { pages, currentIndex, loading } = state;
   const hasPages = pages.length > 0;
   $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
   $('backBtn').disabled = currentIndex <= 0 || loading;
   $('resetBtn').disabled = !hasPages || loading;
+  $('contextBtn').disabled = !hasPages || loading;
   $('drillBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
   $('learnBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
   $('drillBtn').classList.toggle('active', state.drillMode);
@@ -442,7 +565,7 @@ function updateUI() {
         thumb.src = page.imageUrl;
         thumb.alt = `Page ${i + 1}`;
       }
-      thumb.onclick = () => { if (!state.loading) { state.currentIndex = i; state.pendingClick = null; renderCurrentPage(); updateUI(); } };
+      thumb.onclick = () => { if (!state.loading) { state.currentIndex = i; state.pendingClick = null; renderCurrentPage(); updateUI(); saveSession(); } };
       const label = document.createElement('span');
       label.textContent = i + 1;
       wrapper.appendChild(thumb);
@@ -474,12 +597,16 @@ function renderCurrentPage() {
     article.innerHTML = `
       <div class="text-page-header">
         <div class="text-page-title">${escapeHtml(page.title || 'Drill-down explanation')}</div>
-        <div class="text-page-kind">Text response</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+          <div class="text-page-kind">Text response</div>
+          ${rendererActions(page)}
+        </div>
       </div>
       <div class="text-page-content">${simpleMarkdown(page.content || '')}</div>
       ${page.source ? `<div class="text-page-source">Generated via ${escapeHtml(page.source)}</div>` : ''}
     `;
     canvas.appendChild(article);
+    bindRendererActions(page);
     renderMath(article);
     return;
   }
@@ -496,7 +623,10 @@ function renderCurrentPage() {
     article.innerHTML = `
       <div class="text-page-header">
         <div class="text-page-title">${escapeHtml(page.title || page.chart?.title || 'Chart drill-down')}</div>
-        <div class="text-page-kind">Chart response</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+          <div class="text-page-kind">Chart response</div>
+          ${rendererActions(page)}
+        </div>
       </div>
       ${chartSvg(page.chart || {})}
       ${notes}
@@ -504,6 +634,7 @@ function renderCurrentPage() {
       ${page.source ? `<div class="text-page-source">Generated via ${escapeHtml(page.source)}</div>` : ''}
     `;
     canvas.appendChild(article);
+    bindRendererActions(page);
     return;
   }
 
@@ -553,6 +684,22 @@ function renderCurrentPage() {
     intentInput.placeholder = 'Optional question or goal for this spot';
     intentInput.maxLength = 500;
     intentInput.value = state.pendingClick.intent || '';
+    const depthSelect = document.createElement('select');
+    depthSelect.className = 'confirm-select';
+    depthSelect.innerHTML = `
+      <option value="extract">Extract</option>
+      <option value="explain">Explain Here</option>
+      <option value="teach">Teach Concepts</option>
+    `;
+    depthSelect.value = state.responseDepth;
+    depthSelect.onchange = () => { state.responseDepth = depthSelect.value; };
+    const languageInput = document.createElement('input');
+    languageInput.className = 'confirm-language';
+    languageInput.type = 'text';
+    languageInput.placeholder = 'Language';
+    languageInput.maxLength = 80;
+    languageInput.value = state.language;
+    languageInput.oninput = () => { state.language = languageInput.value.trim(); };
 
     const goBtn = document.createElement('button');
     goBtn.className = 'btn confirm-go';
@@ -589,6 +736,8 @@ function renderCurrentPage() {
     cancelBtn.textContent = 'Cancel';
     cancelBtn.onclick = () => { state.pendingClick = null; renderCurrentPage(); };
     bar.appendChild(intentInput);
+    bar.appendChild(depthSelect);
+    bar.appendChild(languageInput);
     bar.appendChild(goBtn);
     bar.appendChild(textBtn);
     bar.appendChild(chartBtn);
@@ -626,6 +775,7 @@ async function generateFirstPage(query) {
     const { page } = await res.json();
     state.pages = [page];
     state.currentIndex = 0;
+    saveSession();
     clearError();
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
@@ -637,15 +787,92 @@ async function generateChildPage(parentId, x, y, responseKind = 'image', intent 
   try {
     const res = await fetch('/api/page', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parentId, parentClick: { x, y }, responseKind, intent }),
+      body: JSON.stringify({ parentId, parentClick: { x, y }, responseKind, intent, responseDepth: state.responseDepth, language: state.language }),
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
     const { page } = await res.json();
     state.pages.push(page);
     state.currentIndex = state.pages.length - 1;
+    saveSession();
     clearError();
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
+}
+
+async function loadPageIntoSession(pageId) {
+  clearError();
+  showStatus('Loading saved page...');
+  try {
+    const page = await fetchSavedPage(pageId);
+    if (!page) throw new Error('Saved page not found');
+    const existing = state.pages.findIndex(p => p.id === page.id);
+    if (existing >= 0) {
+      state.currentIndex = existing;
+    } else {
+      state.pages.push(page);
+      state.currentIndex = state.pages.length - 1;
+    }
+    state.pendingClick = null;
+    state.drillMode = false;
+    renderCurrentPage();
+    updateUI();
+    saveSession();
+    closePanel('gallery');
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    clearStatus();
+  }
+}
+
+async function loadPagesIntoSession(pageIds) {
+  clearError();
+  showStatus('Loading gallery folder...');
+  try {
+    for (const pageId of pageIds) {
+      if (state.pages.some(p => p.id === pageId)) continue;
+      const page = await fetchSavedPage(pageId);
+      if (page) state.pages.push(page);
+    }
+    if (state.pages.length) {
+      state.currentIndex = state.pages.length - 1;
+      state.pendingClick = null;
+      state.drillMode = false;
+      renderCurrentPage();
+      updateUI();
+      saveSession();
+      closePanel('gallery');
+    }
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    clearStatus();
+  }
+}
+
+async function translateCurrentPage(language) {
+  const page = state.pages[state.currentIndex];
+  if (!page || !language) return;
+  clearError();
+  showStatus(`Translating to ${language}...`);
+  try {
+    const res = await fetch(`/api/translate/${page.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
+    const { page: translated } = await res.json();
+    if (translated && !state.pages.some(p => p.id === translated.id)) state.pages.push(translated);
+    state.currentIndex = state.pages.findIndex(p => p.id === translated.id);
+    renderCurrentPage();
+    updateUI();
+    saveSession();
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    clearStatus();
+  }
 }
 
 async function generateUploadContext(pageId) {
@@ -661,6 +888,7 @@ async function generateUploadContext(pageId) {
     if (page && !state.pages.some(p => p.id === page.id)) {
       state.pages.push(page);
       state.currentIndex = state.pages.length - 1;
+      saveSession();
       renderCurrentPage();
       updateUI();
     }
@@ -696,6 +924,7 @@ async function uploadImage(file) {
     const { page } = await res.json();
     state.pages = [page];
     state.currentIndex = 0;
+    saveSession();
     renderCurrentPage();
     updateUI();
     clearError();
@@ -719,22 +948,34 @@ async function openGallery() {
     for (const f of data.folders) {
       const modeConfig = state.modes.find(m => m.id === f.mode);
       const tag = modeConfig?.tagLabel || f.mode || 'illustration';
-      html += `<div class="gallery-folder"><div class="gallery-folder-header"><span class="gallery-folder-title">${escapeHtml(f.query)}</span><span class="gallery-folder-meta"><span class="mode-tag">${escapeHtml(tag)}</span>${f.imageCount} images${f.textCount ? ` · ${f.textCount} text` : ''}<span>${formatBytes(f.totalSize)}</span></span></div>`;
+      const folderIds = [...(f.images || []), ...(f.texts || [])]
+        .sort((a, b) => new Date(a.created) - new Date(b.created))
+        .map(item => item.id);
+      html += `<div class="gallery-folder"><div class="gallery-folder-header"><span class="gallery-folder-title">${escapeHtml(f.query)}</span><span class="gallery-folder-meta"><button class="gallery-open-folder" data-folder-ids="${escapeHtml(folderIds.join(','))}">Open Folder</button><span class="mode-tag">${escapeHtml(tag)}</span>${f.imageCount} images${f.textCount ? ` · ${f.textCount} text` : ''}<span>${formatBytes(f.totalSize)}</span></span></div>`;
       html += `<div class="gallery-folder-path">${f.path}</div><div class="gallery-images">`;
       for (const img of f.images) {
-        html += `<div class="gallery-img-card" onclick="window.open('${img.url}','_blank')"><img src="${img.url}" loading="lazy"><div class="gallery-img-meta"><span>${img.id.slice(0,8)}...</span><span>${formatBytes(img.size)}</span></div></div>`;
+        html += `<div class="gallery-img-card" data-page-id="${img.id}"><img src="${img.url}" loading="lazy"><div class="gallery-img-meta"><span>${img.id.slice(0,8)}...</span><span>${formatBytes(img.size)}</span></div></div>`;
       }
       html += '</div>';
       if (f.texts?.length) {
         html += '<div class="gallery-texts">';
         for (const text of f.texts) {
-          html += `<div class="gallery-text-card"><div class="gallery-text-title">${escapeHtml(text.title || 'Text drill-down')}</div><div class="gallery-text-meta"><span>${text.id.slice(0,8)}...</span><span>${formatBytes(text.size)}</span></div></div>`;
+          html += `<div class="gallery-text-card" data-page-id="${text.id}"><div class="gallery-text-title">${escapeHtml(text.title || 'Text drill-down')}</div><div class="gallery-text-meta"><span>${text.id.slice(0,8)}...</span><span>${formatBytes(text.size)}</span></div></div>`;
         }
         html += '</div>';
       }
       html += '</div>';
     }
     $('galleryBody').innerHTML = html;
+    $('galleryBody').querySelectorAll('[data-page-id]').forEach(card => {
+      card.addEventListener('click', () => loadPageIntoSession(card.dataset.pageId));
+    });
+    $('galleryBody').querySelectorAll('[data-folder-ids]').forEach(button => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        loadPagesIntoSession(button.dataset.folderIds.split(',').filter(Boolean));
+      });
+    });
   } catch (err) { $('galleryBody').innerHTML = `<p style="color:#b91c1c">Error: ${err.message}</p>`; }
 }
 
@@ -761,6 +1002,14 @@ async function openSettings() {
 
     $('settingsBody').innerHTML = `
       <div class="setting-group">
+        <label class="setting-checkbox">
+          <input type="checkbox" id="localOnlyToggle" ${current.localOnly ? 'checked' : ''}>
+          <span>Keep it local
+            <small>Blocks cloud model calls. Image generation and image drill-ins will stay disabled until a local image model is configured.</small>
+          </span>
+        </label>
+      </div>
+      <div class="setting-group">
         <label>Image Generation Model</label>
         <p class="desc">Used when generating the first page from a text prompt.</p>
         <select class="setting-select" id="genModelSelect">${optionsFor('generation')}</select>
@@ -774,7 +1023,7 @@ async function openSettings() {
       </div>
       <div class="setting-group">
         <label>Image Analysis Model</label>
-        <p class="desc">Used by the Learn feature to generate descriptions and concept explanations. Local models are free. Falls back to Grok if the local model lacks vision support.</p>
+        <p class="desc">Used by Learn, context, translation, and text/chart responses. When Keep it local is enabled, cloud fallback is disabled.</p>
         <select class="setting-select" id="analysisModelSelect">${optionsFor('analysis')}</select>
         <p class="setting-current">Current: ${current.analysis.provider}/${current.analysis.model}</p>
       </div>
@@ -798,6 +1047,7 @@ async function openSettings() {
           generation: { provider: gProv, model: gModel },
           editing: { provider: eProv, model: eModel },
           analysis: { provider: aProv, model: aModel },
+          localOnly: $('localOnlyToggle').checked,
         }),
       });
       if (r.ok) { closePanel('settings'); } else { const d = await r.json(); showError(d.error); }
@@ -825,6 +1075,31 @@ function simpleMarkdown(text) {
     .replace(/^(?!<[hlu])/gm, function(m) { return m; })
     .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
     .replace(/\n/g, '<br>');
+}
+
+function contextMarkdown(text) {
+  return String(text || '').replace(/## Suggested Drill Targets[\s\S]*$/i, '').trim();
+}
+
+async function openContext() {
+  const page = state.pages[state.currentIndex];
+  if (!page) return;
+  $('contextOverlay').classList.add('visible');
+  $('contextPanel').classList.add('visible');
+  $('contextBody').innerHTML = `<div class="loading-msg"><span class="spinner"></span>Loading source context...</div>`;
+  try {
+    const res = await fetch(`/api/context/${page.id}`);
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
+    const data = await res.json();
+    if (!data.page?.content) {
+      $('contextBody').innerHTML = '<div class="empty-msg">No source context has been generated for this item.</div>';
+      return;
+    }
+    $('contextBody').innerHTML = `<div class="learn-content">${simpleMarkdown(contextMarkdown(data.page.content))}</div>`;
+    renderMath($('contextBody'));
+  } catch (err) {
+    $('contextBody').innerHTML = `<p style="color:#b91c1c">Error: ${escapeHtml(err.message)}</p>`;
+  }
 }
 
 async function openLearn() {
@@ -945,12 +1220,14 @@ $('backBtn').addEventListener('click', () => {
     state.pendingClick = null;
     renderCurrentPage();
     updateUI();
+    saveSession();
   }
 });
 
 $('resetBtn').addEventListener('click', () => {
   if (!state.loading) {
     state.pages = []; state.currentIndex = -1; state.pendingClick = null; state.drillMode = false;
+    localStorage.removeItem(SESSION_KEY);
     $('topicInput').value = '';
     $('topicInput').focus();
     renderCurrentPage(); updateUI(); clearError();
@@ -970,6 +1247,10 @@ $('learnTabs').addEventListener('click', (e) => {
   renderLearnTab();
 });
 
+$('contextBtn').addEventListener('click', openContext);
+$('contextClose').addEventListener('click', () => closePanel('context'));
+$('contextOverlay').addEventListener('click', () => closePanel('context'));
+
 $('galleryBtn').addEventListener('click', openGallery);
 $('galleryClose').addEventListener('click', () => closePanel('gallery'));
 $('galleryOverlay').addEventListener('click', () => closePanel('gallery'));
@@ -978,7 +1259,7 @@ $('settingsBtn').addEventListener('click', openSettings);
 $('settingsClose').addEventListener('click', () => closePanel('settings'));
 $('settingsOverlay').addEventListener('click', () => closePanel('settings'));
 
-loadModes().finally(updateUI);
+loadModes().then(restoreSession).finally(updateUI);
 </script>
 </body>
 </html>
