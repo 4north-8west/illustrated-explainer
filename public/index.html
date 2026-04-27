@@ -12,12 +12,13 @@
   .top-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e8e4df; flex-shrink: 0; gap: 12px; flex-wrap: wrap; }
   .top-bar h1 { font-size: 16px; font-weight: 600; color: #555; letter-spacing: 0.5px; white-space: nowrap; }
   .top-bar .page-counter { font-size: 13px; color: #888; min-width: 50px; text-align: center; }
-  .controls { display: flex; gap: 6px; flex-wrap: wrap; }
+  .controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .btn { padding: 5px 14px; border: 1px solid #ccc; background: #fff; border-radius: 6px; font-family: inherit; font-size: 12px; cursor: pointer; color: #555; transition: all 0.15s; }
   .btn:hover:not(:disabled) { background: #f0ede8; border-color: #aaa; }
   .btn:disabled { opacity: 0.4; cursor: default; }
   .btn.drill-btn.active { background: #5a7d6a; color: #fff; border-color: #5a7d6a; }
   .btn.drill-btn.active:hover { background: #4a6a58; }
+  .global-language { width: 120px; padding: 5px 9px; border: 1px solid #ccc; border-radius: 6px; font-family: inherit; font-size: 12px; color: #555; background: #fff; }
 
   /* --- Topic area --- */
   .topic-area { display: flex; justify-content: center; padding: 14px 20px; flex-shrink: 0; }
@@ -60,10 +61,10 @@
   @keyframes marker-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }
 
   /* Confirm bar */
-  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: minmax(220px, 1fr) 130px 130px auto auto auto auto; gap: 8px; z-index: 6; background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; width: min(1120px, calc(100vw - 48px)); }
+  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: minmax(220px, 1fr) 130px auto auto auto auto auto auto; gap: 8px; z-index: 6; background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; width: min(1190px, calc(100vw - 48px)); }
   .confirm-intent { min-width: 0; padding: 6px 10px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 13px; outline: none; }
   .confirm-intent:focus { border-color: #999; }
-  .confirm-select, .confirm-language { min-width: 0; padding: 6px 9px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 12px; background: #fff; color: #555; }
+  .confirm-select { min-width: 0; padding: 6px 9px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 12px; background: #fff; color: #555; }
   .confirm-bar .btn { font-size: 13px; padding: 6px 18px; }
   .confirm-bar .btn.confirm-go { background: #5a7d6a; color: #fff; border-color: #5a7d6a; }
   .confirm-bar .btn.confirm-go:hover { background: #4a6a58; }
@@ -73,7 +74,7 @@
   .confirm-bar .btn.confirm-chart:hover { background: #385665; }
   @media (max-width: 720px) {
     .confirm-bar { grid-template-columns: 1fr 1fr; }
-    .confirm-intent, .confirm-select, .confirm-language { grid-column: 1 / -1; }
+    .confirm-intent, .confirm-select { grid-column: 1 / -1; }
   }
 
   /* --- Error banner --- */
@@ -117,6 +118,13 @@
   .chart-page svg { display: block; width: 100%; height: auto; overflow: visible; }
   .chart-notes { margin: 14px 0 0 18px; font-size: 13px; line-height: 1.5; color: #555; }
   .chart-uncertainty { margin-top: 12px; font-size: 12px; color: #8a6d3b; background: #fff8e8; border: 1px solid #f0dfb8; border-radius: 6px; padding: 8px 10px; }
+  .table-wrap { width: 100%; overflow-x: auto; margin-top: 10px; }
+  .drill-table { width: 100%; border-collapse: collapse; font-size: 14px; color: #444; }
+  .drill-table th, .drill-table td { border: 1px solid #e4ded6; padding: 9px 10px; text-align: left; vertical-align: top; line-height: 1.4; }
+  .drill-table th { background: #f4f0ea; color: #3e362d; font-weight: 700; }
+  .drill-table tr:nth-child(even) td { background: #fdfbf8; }
+  .diagram-page svg { display: block; width: 100%; height: auto; margin-top: 8px; }
+  .diagram-notes { margin: 14px 0 0 18px; font-size: 13px; line-height: 1.5; color: #555; }
 
   /* --- Slide panels (gallery, settings) --- */
   .panel-overlay { display: none; position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.3); }
@@ -221,6 +229,7 @@
     <button class="btn" id="contextBtn" disabled>Context</button>
     <button class="btn" id="learnBtn" disabled>Learn</button>
     <button class="btn" id="galleryBtn">Gallery</button>
+    <input class="global-language" id="globalLanguageInput" type="text" placeholder="Language">
     <button class="btn" id="settingsBtn">Models</button>
   </div>
 </div>
@@ -381,6 +390,91 @@ function chartSvg(chart) {
   </svg>`;
 }
 
+function tableHtml(table) {
+  const spec = table || {};
+  const columns = Array.isArray(spec.columns) && spec.columns.length ? spec.columns : ['Item', 'Explanation'];
+  const rows = Array.isArray(spec.rows) ? spec.rows : [];
+  const head = columns.map(column => `<th>${escapeHtml(column)}</th>`).join('');
+  const body = rows.length
+    ? rows.map(row => `<tr>${columns.map((_column, i) => `<td>${escapeHtml(row?.[i] ?? '')}</td>`).join('')}</tr>`).join('')
+    : `<tr><td colspan="${columns.length}">No table rows were returned.</td></tr>`;
+  return `<div class="table-wrap"><table class="drill-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function wrapSvgText(text, maxChars = 18, maxLines = 3) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length > maxChars && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = next;
+    }
+    if (lines.length >= maxLines) break;
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines.length ? lines : [''];
+}
+
+function diagramSvg(diagram) {
+  const spec = diagram || {};
+  const nodes = Array.isArray(spec.nodes) && spec.nodes.length ? spec.nodes : [{ id: 'n1', label: 'Selected region', kind: 'concept' }];
+  const edges = Array.isArray(spec.edges) ? spec.edges : [];
+  const isLR = spec.direction === 'LR';
+  const w = 900;
+  const h = Math.max(360, isLR ? 280 + Math.ceil(nodes.length / 2) * 80 : 170 + nodes.length * 92);
+  const boxW = isLR ? 190 : 260;
+  const boxH = 66;
+  const colors = {
+    concept: ['#f8f5ef', '#8a785d'],
+    process: ['#eef5f0', '#5a7d6a'],
+    data: ['#eef4f7', '#496a7a'],
+    warning: ['#fff8e8', '#b2873b'],
+    result: ['#f2f0f7', '#6e6188'],
+  };
+  const positions = new Map();
+  nodes.forEach((node, i) => {
+    const x = isLR
+      ? 70 + (i % Math.max(1, Math.ceil(nodes.length / 2))) * Math.min(230, (w - 150) / Math.max(1, Math.ceil(nodes.length / 2)))
+      : (w - boxW) / 2;
+    const y = isLR
+      ? 92 + Math.floor(i / Math.max(1, Math.ceil(nodes.length / 2))) * 132
+      : 82 + i * 92;
+    positions.set(node.id, { x, y });
+  });
+  const marker = `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8277"/></marker></defs>`;
+  const edgeEls = edges.map(edge => {
+    const from = positions.get(edge.from);
+    const to = positions.get(edge.to);
+    if (!from || !to) return '';
+    const x1 = from.x + boxW / 2;
+    const y1 = from.y + boxH;
+    const x2 = to.x + boxW / 2;
+    const y2 = to.y;
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    return `<path d="M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}" fill="none" stroke="#8a8277" stroke-width="2" marker-end="url(#arrow)"/>${edge.label ? `<text x="${midX}" y="${midY - 6}" text-anchor="middle" font-size="11" fill="#6b6258">${escapeHtml(edge.label)}</text>` : ''}`;
+  }).join('');
+  const nodeEls = nodes.map(node => {
+    const pos = positions.get(node.id);
+    const [fill, stroke] = colors[node.kind] || colors.concept;
+    const labelLines = wrapSvgText(node.label, 22, 2);
+    const detailLines = node.detail ? wrapSvgText(node.detail, 28, 1) : [];
+    const labelText = labelLines.map((line, i) => `<tspan x="${pos.x + boxW / 2}" dy="${i ? 16 : 0}">${escapeHtml(line)}</tspan>`).join('');
+    const detailText = detailLines.map(line => `<text x="${pos.x + boxW / 2}" y="${pos.y + 50}" text-anchor="middle" font-size="10" fill="#777">${escapeHtml(line)}</text>`).join('');
+    return `<rect x="${pos.x}" y="${pos.y}" width="${boxW}" height="${boxH}" rx="7" fill="${fill}" stroke="${stroke}" stroke-width="2"/><text x="${pos.x + boxW / 2}" y="${pos.y + 25}" text-anchor="middle" font-size="13" font-weight="700" fill="#333">${labelText}</text>${detailText}`;
+  }).join('');
+  return `<svg class="diagram-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="${escapeHtml(spec.title || 'Diagram')}">
+    ${marker}
+    <text x="${w / 2}" y="30" text-anchor="middle" font-size="20" font-weight="700" fill="#333">${escapeHtml(spec.title || 'Diagram')}</text>
+    ${edgeEls}
+    ${nodeEls}
+  </svg>`;
+}
+
 // --- Core functions ---
 
 function currentModeConfig() {
@@ -441,7 +535,7 @@ function clearStatus() { $('statusNote').style.display = 'none'; $('statusNote')
 
 function rendererActions(page) {
   const language = escapeHtml(state.language || '');
-  const canTranslate = page.type === 'markdown' || page.type === 'chart';
+  const canTranslate = page.type === 'markdown' || page.type === 'chart' || page.type === 'table' || page.type === 'diagram';
   const translate = canTranslate
     ? `<input class="renderer-language" id="rendererLanguage" placeholder="Language" value="${language}"><button class="renderer-action-btn" id="translatePageBtn">Translate</button>`
     : '';
@@ -540,6 +634,7 @@ function updateUI() {
   const { pages, currentIndex, loading } = state;
   const hasPages = pages.length > 0;
   $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
+  if ($('globalLanguageInput') && $('globalLanguageInput').value !== state.language) $('globalLanguageInput').value = state.language;
   $('backBtn').disabled = currentIndex <= 0 || loading;
   $('resetBtn').disabled = !hasPages || loading;
   $('contextBtn').disabled = !hasPages || loading;
@@ -554,11 +649,11 @@ function updateUI() {
       const wrapper = document.createElement('div');
       wrapper.className = 'thumb-index';
       let thumb;
-      if (page.type === 'markdown' || page.type === 'chart') {
+      if (page.type === 'markdown' || page.type === 'chart' || page.type === 'table' || page.type === 'diagram') {
         thumb = document.createElement('div');
         thumb.className = `text-thumb${i === currentIndex ? ' active' : ''}`;
-        thumb.textContent = page.type === 'chart' ? 'C' : 'T';
-        thumb.title = page.title || (page.type === 'chart' ? 'Chart page' : 'Text page');
+        thumb.textContent = ({ markdown: 'M', chart: 'C', table: 'T', diagram: 'D' })[page.type] || 'T';
+        thumb.title = page.title || `${page.type} page`;
       } else {
         thumb = document.createElement('img');
         thumb.className = `thumb${i === currentIndex ? ' active' : ''}`;
@@ -638,6 +733,62 @@ function renderCurrentPage() {
     return;
   }
 
+  if (page.type === 'table') {
+    const article = document.createElement('article');
+    article.className = 'chart-page';
+    const notes = page.table?.notes?.length
+      ? `<ul class="chart-notes">${page.table.notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>`
+      : '';
+    const uncertainty = page.table?.uncertainty
+      ? `<div class="chart-uncertainty">${escapeHtml(page.table.uncertainty)}</div>`
+      : '';
+    article.innerHTML = `
+      <div class="text-page-header">
+        <div class="text-page-title">${escapeHtml(page.title || page.table?.title || 'Table drill-down')}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+          <div class="text-page-kind">Table response</div>
+          ${rendererActions(page)}
+        </div>
+      </div>
+      ${tableHtml(page.table || {})}
+      ${notes}
+      ${uncertainty}
+      ${page.source ? `<div class="text-page-source">Generated via ${escapeHtml(page.source)}</div>` : ''}
+    `;
+    canvas.appendChild(article);
+    bindRendererActions(page);
+    renderMath(article);
+    return;
+  }
+
+  if (page.type === 'diagram') {
+    const article = document.createElement('article');
+    article.className = 'chart-page diagram-page';
+    const notes = page.diagram?.notes?.length
+      ? `<ul class="diagram-notes">${page.diagram.notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>`
+      : '';
+    const uncertainty = page.diagram?.uncertainty
+      ? `<div class="chart-uncertainty">${escapeHtml(page.diagram.uncertainty)}</div>`
+      : '';
+    article.innerHTML = `
+      <div class="text-page-header">
+        <div class="text-page-title">${escapeHtml(page.title || page.diagram?.title || 'Diagram drill-down')}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+          <div class="text-page-kind">Diagram response</div>
+          ${rendererActions(page)}
+        </div>
+      </div>
+      ${diagramSvg(page.diagram || {})}
+      ${notes}
+      ${uncertainty}
+      ${page.source ? `<div class="text-page-source">Generated via ${escapeHtml(page.source)}</div>` : ''}
+    `;
+    canvas.appendChild(article);
+    bindRendererActions(page);
+    renderMath(article);
+    return;
+  }
+
   const container = document.createElement('div');
   container.className = `image-container${state.drillMode ? ' clickable' : ''}`;
 
@@ -693,14 +844,6 @@ function renderCurrentPage() {
     `;
     depthSelect.value = state.responseDepth;
     depthSelect.onchange = () => { state.responseDepth = depthSelect.value; };
-    const languageInput = document.createElement('input');
-    languageInput.className = 'confirm-language';
-    languageInput.type = 'text';
-    languageInput.placeholder = 'Language';
-    languageInput.maxLength = 80;
-    languageInput.value = state.language;
-    languageInput.oninput = () => { state.language = languageInput.value.trim(); };
-
     const goBtn = document.createElement('button');
     goBtn.className = 'btn confirm-go';
     goBtn.textContent = 'Image';
@@ -731,16 +874,37 @@ function renderCurrentPage() {
       state.drillMode = false;
       generateChildPage(page.id, x, y, 'chart', intent);
     };
+    const tableBtn = document.createElement('button');
+    tableBtn.className = 'btn confirm-text';
+    tableBtn.textContent = 'Table';
+    tableBtn.onclick = () => {
+      const { x, y } = state.pendingClick;
+      const intent = intentInput.value.trim();
+      state.pendingClick = null;
+      state.drillMode = false;
+      generateChildPage(page.id, x, y, 'table', intent);
+    };
+    const diagramBtn = document.createElement('button');
+    diagramBtn.className = 'btn confirm-chart';
+    diagramBtn.textContent = 'Diagram';
+    diagramBtn.onclick = () => {
+      const { x, y } = state.pendingClick;
+      const intent = intentInput.value.trim();
+      state.pendingClick = null;
+      state.drillMode = false;
+      generateChildPage(page.id, x, y, 'diagram', intent);
+    };
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn';
     cancelBtn.textContent = 'Cancel';
     cancelBtn.onclick = () => { state.pendingClick = null; renderCurrentPage(); };
     bar.appendChild(intentInput);
     bar.appendChild(depthSelect);
-    bar.appendChild(languageInput);
     bar.appendChild(goBtn);
     bar.appendChild(textBtn);
     bar.appendChild(chartBtn);
+    bar.appendChild(tableBtn);
+    bar.appendChild(diagramBtn);
     bar.appendChild(cancelBtn);
     container.appendChild(bar);
     requestAnimationFrame(() => intentInput.focus());
@@ -1036,6 +1200,18 @@ async function openSettings() {
     $('genModelSelect').value = `${current.generation.provider}/${current.generation.model}`;
     $('editModelSelect').value = `${current.editing.provider}/${current.editing.model}`;
     $('analysisModelSelect').value = `${current.analysis.provider}/${current.analysis.model}`;
+    $('localOnlyToggle').onchange = async () => {
+      const r = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ localOnly: $('localOnlyToggle').checked }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        showError(d.error || 'Could not save Keep it local setting');
+        $('localOnlyToggle').checked = !$('localOnlyToggle').checked;
+      }
+    };
 
     $('saveSettingsBtn').onclick = async () => {
       const [gProv, gModel] = $('genModelSelect').value.split('/');
@@ -1236,6 +1412,10 @@ $('resetBtn').addEventListener('click', () => {
 
 $('uploadBtn').addEventListener('click', () => { if (!state.loading) $('fileInput').click(); });
 $('fileInput').addEventListener('change', (e) => { if (e.target.files[0]) { uploadImage(e.target.files[0]); e.target.value = ''; } });
+$('globalLanguageInput').addEventListener('input', (e) => {
+  state.language = e.target.value.trim();
+  saveSession();
+});
 
 $('learnBtn').addEventListener('click', openLearn);
 $('learnClose').addEventListener('click', () => closePanel('learn'));

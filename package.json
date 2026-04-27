@@ -1,7 +1,7 @@
 {
   "name": "illustrated-explainer",
   "version": "1.0.0",
-  "description": "Infinite drill-down illustrated explainer powered by Grok",
+  "description": "Local-first illustrated explainer with click-targeted drill-down renderers",
   "type": "module",
   "main": "server.js",
   "scripts": {

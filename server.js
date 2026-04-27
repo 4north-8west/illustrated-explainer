@@ -20,8 +20,7 @@ const ANALYSIS_DIR = path.join(GENERATED_DIR, '_analysis');
 const LLAMA_SERVER_URL = process.env.LLAMA_SERVER_URL || 'http://localhost:8080';
 
 if (!XAI_API_KEY) {
-  console.error('XAI_API_KEY is required in .env');
-  process.exit(1);
+  console.warn('XAI_API_KEY is not set. xAI cloud models will be unavailable.');
 }
 
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
@@ -714,7 +713,7 @@ Respond with a focused Markdown learning page:
     const text = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
     return { text, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
   } catch (err) {
-    if (cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
+    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
       const text = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
       return { text, source: 'grok (fallback)' };
     }
@@ -752,6 +751,57 @@ function normalizeChartSpec(spec) {
     points,
     notes: Array.isArray(chart.notes) ? chart.notes.map(note => String(note).slice(0, 240)).slice(0, 6) : [],
     uncertainty: String(chart.uncertainty || '').slice(0, 500),
+  };
+}
+
+function normalizeTableSpec(spec) {
+  const table = spec && typeof spec === 'object' ? spec : {};
+  const columns = Array.isArray(table.columns)
+    ? table.columns.map(column => String(column).slice(0, 80)).filter(Boolean).slice(0, 8)
+    : [];
+  const rows = Array.isArray(table.rows)
+    ? table.rows.map(row => {
+      const values = Array.isArray(row) ? row : columns.map(column => row?.[column] ?? '');
+      return values.map(value => String(value ?? '').slice(0, 240)).slice(0, columns.length || 8);
+    }).filter(row => row.length).slice(0, 40)
+    : [];
+  const safeColumns = columns.length ? columns : rows[0]?.map((_value, index) => `Column ${index + 1}`) || ['Item', 'Explanation'];
+
+  return {
+    title: String(table.title || 'Table drill-down').slice(0, 120),
+    columns: safeColumns,
+    rows: rows.map(row => safeColumns.map((_column, index) => row[index] ?? '')),
+    notes: Array.isArray(table.notes) ? table.notes.map(note => String(note).slice(0, 240)).slice(0, 6) : [],
+    uncertainty: String(table.uncertainty || '').slice(0, 500),
+  };
+}
+
+function normalizeDiagramSpec(spec) {
+  const diagram = spec && typeof spec === 'object' ? spec : {};
+  const rawNodes = Array.isArray(diagram.nodes) ? diagram.nodes : [];
+  const nodes = rawNodes.map((node, index) => ({
+    id: String(node.id || `n${index + 1}`).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 30) || `n${index + 1}`,
+    label: String(node.label || node.id || `Step ${index + 1}`).slice(0, 90),
+    detail: String(node.detail || '').slice(0, 220),
+    kind: ['concept', 'process', 'data', 'warning', 'result'].includes(node.kind) ? node.kind : 'concept',
+  })).slice(0, 16);
+  const nodeIds = new Set(nodes.map(node => node.id));
+  const edges = Array.isArray(diagram.edges) ? diagram.edges
+    .map(edge => ({
+      from: String(edge.from || ''),
+      to: String(edge.to || ''),
+      label: String(edge.label || '').slice(0, 70),
+    }))
+    .filter(edge => nodeIds.has(edge.from) && nodeIds.has(edge.to) && edge.from !== edge.to)
+    .slice(0, 24) : [];
+
+  return {
+    title: String(diagram.title || 'Diagram drill-down').slice(0, 120),
+    direction: diagram.direction === 'LR' ? 'LR' : 'TB',
+    nodes: nodes.length ? nodes : [{ id: 'n1', label: 'Selected region', detail: 'The model did not identify enough structure for a diagram.', kind: 'concept' }],
+    edges,
+    notes: Array.isArray(diagram.notes) ? diagram.notes.map(note => String(note).slice(0, 240)).slice(0, 6) : [],
+    uncertainty: String(diagram.uncertainty || '').slice(0, 500),
   };
 }
 
@@ -805,7 +855,7 @@ Rules:
   try {
     result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
   } catch (err) {
-    if (cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
+    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
       result = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
       const chart = normalizeChartSpec(parseJsonResponse(result));
       return { chart, source: 'grok (fallback)' };
@@ -815,6 +865,129 @@ Rules:
 
   const chart = normalizeChartSpec(parseJsonResponse(result));
   return { chart, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
+}
+
+async function generateTableDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
+  const imageBase64 = compositedImageBuffer.toString('base64');
+  const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
+  const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
+  const contextText = contextTrail.map((item, index) => {
+    const step = index + 1;
+    const intentText = item.intent ? ` Intent: ${item.intent}` : '';
+    return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
+  }).join('\n');
+  const uploadContextText = uploadContext?.content
+    ? `\n\nSource upload analysis:\n${uploadContext.content.slice(0, 5000)}`
+    : '';
+
+  const systemPrompt = `You convert only the exact selected image region into a locally renderable educational table. Return JSON only. Preserve visible wording when extraction is requested.`;
+  const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
+
+Focus on the feature at the center of the right zoomed panel. Use the full left panel only for context.
+
+The learner clicked this region in a ${modeLabel}.
+
+Learner intent: ${intent || 'Organize the marked region as a useful table.'}
+
+${responseDepthInstruction(responseDepth, language)}
+
+Drill-down context:
+${contextText || 'No prior context available.'}${uploadContextText}
+
+Return one JSON object only, with this shape:
+{
+  "title": "short table title",
+  "columns": ["Column A", "Column B"],
+  "rows": [
+    ["cell", "cell"]
+  ],
+  "notes": ["short teaching note"],
+  "uncertainty": "what is inferred or approximate"
+}
+
+Rules:
+- Use tables for comparisons, extracted text blocks, equation parts, data labels, vocabulary, steps, or cause/effect relationships.
+- Use 2-8 columns and 2-40 rows.
+- Do not invent precise source text. If text is unclear, mark it as uncertain.`;
+
+  const cfg = modelConfig.analysis;
+  let result;
+  try {
+    result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
+  } catch (err) {
+    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
+      result = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
+      const table = normalizeTableSpec(parseJsonResponse(result));
+      return { table, source: 'grok (fallback)' };
+    }
+    throw err;
+  }
+
+  const table = normalizeTableSpec(parseJsonResponse(result));
+  return { table, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
+}
+
+async function generateDiagramDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
+  const imageBase64 = compositedImageBuffer.toString('base64');
+  const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
+  const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
+  const contextText = contextTrail.map((item, index) => {
+    const step = index + 1;
+    const intentText = item.intent ? ` Intent: ${item.intent}` : '';
+    return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
+  }).join('\n');
+  const uploadContextText = uploadContext?.content
+    ? `\n\nSource upload analysis:\n${uploadContext.content.slice(0, 5000)}`
+    : '';
+
+  const systemPrompt = `You convert only the exact selected image region into a locally renderable educational diagram specification. Return JSON only. The app will render the diagram itself as SVG; do not request image generation.`;
+  const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
+
+Focus on the feature at the center of the right zoomed panel. Use the full left panel only for context.
+
+The learner clicked this region in a ${modeLabel}.
+
+Learner intent: ${intent || 'Turn the marked region into a concept or process diagram.'}
+
+${responseDepthInstruction(responseDepth, language)}
+
+Drill-down context:
+${contextText || 'No prior context available.'}${uploadContextText}
+
+Return one JSON object only, with this shape:
+{
+  "title": "short diagram title",
+  "direction": "TB" | "LR",
+  "nodes": [
+    { "id": "n1", "label": "short node label", "detail": "optional detail", "kind": "concept" | "process" | "data" | "warning" | "result" }
+  ],
+  "edges": [
+    { "from": "n1", "to": "n2", "label": "optional relationship label" }
+  ],
+  "notes": ["short teaching note"],
+  "uncertainty": "what is inferred or approximate"
+}
+
+Rules:
+- Use diagrams for process flows, dependency chains, equation relationships, systems, mechanisms, and cause/effect.
+- Use 2-12 nodes unless the selected region clearly needs more.
+- Keep labels short enough to render inside boxes.`;
+
+  const cfg = modelConfig.analysis;
+  let result;
+  try {
+    result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
+  } catch (err) {
+    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
+      result = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
+      const diagram = normalizeDiagramSpec(parseJsonResponse(result));
+      return { diagram, source: 'grok (fallback)' };
+    }
+    throw err;
+  }
+
+  const diagram = normalizeDiagramSpec(parseJsonResponse(result));
+  return { diagram, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
 }
 
 // --- Model config API ---
@@ -1060,10 +1233,19 @@ async function translatePageContent(page, language) {
   const cfg = modelConfig.analysis;
   const sourceName = cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`;
   const systemPrompt = `Translate educational content accurately. Preserve Markdown structure, LaTeX, formulas, code, variable names, numeric values, and proper nouns unless a standard translation exists.`;
-  const chartText = page.type === 'chart'
-    ? `Chart title: ${page.chart?.title || page.title}\nX label: ${page.chart?.xLabel || ''}\nY label: ${page.chart?.yLabel || ''}\nNotes:\n${(page.chart?.notes || []).map(n => `- ${n}`).join('\n')}\nUncertainty: ${page.chart?.uncertainty || ''}`
-    : page.content || '';
-  const userPrompt = `Translate the following content into ${language}. Return Markdown only.\n\n${chartText}`;
+  const sourceText = (() => {
+    if (page.type === 'chart') {
+      return `Chart title: ${page.chart?.title || page.title}\nX label: ${page.chart?.xLabel || ''}\nY label: ${page.chart?.yLabel || ''}\nNotes:\n${(page.chart?.notes || []).map(n => `- ${n}`).join('\n')}\nUncertainty: ${page.chart?.uncertainty || ''}`;
+    }
+    if (page.type === 'table') {
+      return `Table title: ${page.table?.title || page.title}\nColumns: ${(page.table?.columns || []).join(' | ')}\nRows:\n${(page.table?.rows || []).map(row => `- ${row.join(' | ')}`).join('\n')}\nNotes:\n${(page.table?.notes || []).map(n => `- ${n}`).join('\n')}\nUncertainty: ${page.table?.uncertainty || ''}`;
+    }
+    if (page.type === 'diagram') {
+      return `Diagram title: ${page.diagram?.title || page.title}\nNodes:\n${(page.diagram?.nodes || []).map(n => `- ${n.label}${n.detail ? `: ${n.detail}` : ''}`).join('\n')}\nEdges:\n${(page.diagram?.edges || []).map(e => `- ${e.from} -> ${e.to}${e.label ? `: ${e.label}` : ''}`).join('\n')}\nNotes:\n${(page.diagram?.notes || []).map(n => `- ${n}`).join('\n')}\nUncertainty: ${page.diagram?.uncertainty || ''}`;
+    }
+    return page.content || '';
+  })();
+  const userPrompt = `Translate the following content into ${language}. Return Markdown only.\n\n${sourceText}`;
   try {
     const text = await callTextChat(cfg.provider, cfg.model, systemPrompt, userPrompt);
     return { text, source: sourceName };
@@ -1084,8 +1266,8 @@ app.post('/api/translate/:pageId', async (req, res) => {
   const sourcePage = pageFromMetadata(pageId);
   const sourceMeta = pageMeta[pageId];
   if (!sourcePage || !sourceMeta) return res.status(404).json({ error: 'Page not found' });
-  if (!['markdown', 'chart', 'upload_context'].includes(sourceMeta.type)) {
-    return res.status(400).json({ error: 'Only text, chart, and context pages can be translated' });
+  if (!['markdown', 'chart', 'table', 'diagram', 'upload_context'].includes(sourceMeta.type)) {
+    return res.status(400).json({ error: 'Only text, chart, table, diagram, and context pages can be translated' });
   }
 
   try {
@@ -1123,7 +1305,7 @@ function pageFromMetadata(pageId) {
   const meta = pageMeta[pageId];
   if (!meta) return null;
 
-  if (meta.type === 'markdown' || meta.type === 'chart' || meta.type === 'upload_context') {
+  if (meta.type === 'markdown' || meta.type === 'chart' || meta.type === 'table' || meta.type === 'diagram' || meta.type === 'upload_context') {
     const content = loadPageContent(meta.folder, pageId);
     if (!content) return null;
     return content;
@@ -1156,7 +1338,7 @@ app.get('/api/page/:pageId', (req, res) => {
 
 app.post('/api/page', async (req, res) => {
   const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind, responseDepth: reqResponseDepth, language: reqLanguage } = req.body;
-  const responseKind = ['markdown', 'chart'].includes(reqResponseKind) ? reqResponseKind : 'image';
+  const responseKind = ['markdown', 'chart', 'table', 'diagram'].includes(reqResponseKind) ? reqResponseKind : 'image';
   const intent = typeof reqIntent === 'string' ? reqIntent.trim().slice(0, 500) : '';
   const responseDepth = ['extract', 'explain', 'teach'].includes(reqResponseDepth) ? reqResponseDepth : 'explain';
   const language = typeof reqLanguage === 'string' ? reqLanguage.trim().slice(0, 80) : '';
@@ -1234,7 +1416,7 @@ app.post('/api/page', async (req, res) => {
         if (!fs.existsSync(parentPath)) throw new Error('Parent image not found');
         console.log(`[${mode}] Generating child page: ${parentId} @ (${parentClickData.x}, ${parentClickData.y}) -> ${folder}/${id}`);
         const composited = await compositeRedMarker(parentPath, parentClick.x, parentClick.y);
-        const focusedComposite = responseKind === 'markdown' || responseKind === 'chart'
+        const focusedComposite = responseKind === 'markdown' || responseKind === 'chart' || responseKind === 'table' || responseKind === 'diagram'
           ? await compositeFocusImage(parentPath, parentClick.x, parentClick.y)
           : null;
         const contextTrail = buildContextTrail(parentId);
@@ -1292,6 +1474,60 @@ app.post('/api/page', async (req, res) => {
           console.log(`Saved: ${chartPath}`);
           return page;
         }
+        if (responseKind === 'table') {
+          const tablePath = pageJsonPath(folder, id);
+          if (fs.existsSync(tablePath)) {
+            const cached = loadPageContent(folder, id);
+            if (cached) return cached;
+          }
+          const result = await generateTableDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language);
+          const page = {
+            id,
+            type: 'table',
+            title: result.table.title || intent || 'Table drill-down',
+            table: result.table,
+            source: result.source,
+            parentId: parentPageId,
+            parentClick: parentClickData,
+            initialQuery,
+            mode,
+            intent,
+            responseDepth,
+            language,
+          };
+          savePageContent(folder, id, page);
+          pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'table', parentId, parentClick: parentClickData, intent, responseDepth, language };
+          saveMetadata(pageMeta);
+          console.log(`Saved: ${tablePath}`);
+          return page;
+        }
+        if (responseKind === 'diagram') {
+          const diagramPath = pageJsonPath(folder, id);
+          if (fs.existsSync(diagramPath)) {
+            const cached = loadPageContent(folder, id);
+            if (cached) return cached;
+          }
+          const result = await generateDiagramDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language);
+          const page = {
+            id,
+            type: 'diagram',
+            title: result.diagram.title || intent || 'Diagram drill-down',
+            diagram: result.diagram,
+            source: result.source,
+            parentId: parentPageId,
+            parentClick: parentClickData,
+            initialQuery,
+            mode,
+            intent,
+            responseDepth,
+            language,
+          };
+          savePageContent(folder, id, page);
+          pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'diagram', parentId, parentClick: parentClickData, intent, responseDepth, language };
+          saveMetadata(pageMeta);
+          console.log(`Saved: ${diagramPath}`);
+          return page;
+        }
         imageBuffer = await generateChildPage(composited, mode, intent, contextTrail);
       }
 
@@ -1306,7 +1542,10 @@ app.post('/api/page', async (req, res) => {
     res.json({ page });
   } catch (err) {
     console.error('Generation error:', err.message);
-    res.status(500).json({ error: 'Generation failed. Try again or click elsewhere.' });
+    const message = err.message?.includes('Keep it local is enabled') || err.message?.includes('No local image')
+      ? err.message
+      : 'Generation failed. Try again or click elsewhere.';
+    res.status(500).json({ error: message });
   }
 });
 
