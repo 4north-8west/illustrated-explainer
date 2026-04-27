@@ -131,13 +131,17 @@ function firstPageId(query, mode) {
   return hash(`first${CACHE_VERSION}${mode}${normalize(query)}`);
 }
 
-function childPageId(parentId, x, y) {
-  return hash(`child${CACHE_VERSION}${parentId}${x.toFixed(2)}${y.toFixed(2)}`);
+function childPageId(parentId, x, y, responseKind = 'image', intent = '') {
+  return hash(`child${CACHE_VERSION}${responseKind}${parentId}${x.toFixed(2)}${y.toFixed(2)}${normalize(intent)}`);
 }
 
 function uploadPageId(buffer, label) {
   const fileHash = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 12);
   return hash(`upload${CACHE_VERSION}${fileHash}${normalize(label)}`);
+}
+
+function uploadContextPageId(pageId) {
+  return hash(`upload-context${CACHE_VERSION}${pageId}`);
 }
 
 // --- Style descriptions per mode ---
@@ -438,10 +442,114 @@ async function generateFirstPage(query, mode) {
   return callGeneration(prompt);
 }
 
-async function generateChildPage(compositedImageBuffer, mode) {
+async function generateChildPage(compositedImageBuffer, mode, intent = '', contextTrail = []) {
   const modeConfig = MODES[mode];
-  const prompt = modeConfig.childPagePrompt(modeConfig.style);
+  const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
+  const intentPrompt = intent
+    ? `\n\nLearner intent for this drill-down: ${intent}\nUse that intent to decide what details to reveal while still focusing on the marked region.`
+    : '';
+  const sourcePrompt = uploadContext?.content
+    ? `\n\nSource upload analysis for context:\n${uploadContext.content.slice(0, 2500)}`
+    : '';
+  const prompt = modeConfig.childPagePrompt(modeConfig.style) + intentPrompt + sourcePrompt;
   return callEditing(prompt, compositedImageBuffer);
+}
+
+function pageJsonPath(folder, id) {
+  return path.join(GENERATED_DIR, folder, `${id}.json`);
+}
+
+function loadPageContent(folder, id) {
+  try { return JSON.parse(fs.readFileSync(pageJsonPath(folder, id), 'utf8')); }
+  catch { return null; }
+}
+
+function savePageContent(folder, id, page) {
+  fs.writeFileSync(pageJsonPath(folder, id), JSON.stringify(page, null, 2));
+}
+
+function buildContextTrail(pageId) {
+  const trail = [];
+  let currentId = pageId;
+  const seen = new Set();
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId);
+    const meta = pageMeta[currentId];
+    if (!meta) break;
+    trail.unshift({
+      id: currentId,
+      type: meta.type || 'image',
+      query: meta.query || '',
+      mode: meta.mode || 'illustration',
+      parentClick: meta.parentClick || null,
+      intent: meta.intent || '',
+    });
+    currentId = meta.parentId;
+  }
+  return trail;
+}
+
+function findNearestUploadContext(pageId) {
+  let currentId = pageId;
+  const seen = new Set();
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId);
+    const meta = pageMeta[currentId];
+    if (!meta) break;
+    if (meta.contextPageId) {
+      const context = loadPageContent(meta.folder, meta.contextPageId);
+      if (context) return context;
+    }
+    if (meta.type === 'upload_context') {
+      const context = loadPageContent(meta.folder, currentId);
+      if (context) return context;
+    }
+    currentId = meta.parentId;
+  }
+  return null;
+}
+
+async function generateTextDrillPage(compositedImageBuffer, mode, intent, contextTrail) {
+  const imageBase64 = compositedImageBuffer.toString('base64');
+  const modeLabel = mode === 'historical_map' ? 'historical map' : 'illustrated explainer';
+  const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
+  const contextText = contextTrail.map((item, index) => {
+    const step = index + 1;
+    const intentText = item.intent ? ` Intent: ${item.intent}` : '';
+    return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
+  }).join('\n');
+  const uploadContextText = uploadContext?.content
+    ? `\n\nSource upload analysis:\n${uploadContext.content.slice(0, 5000)}`
+    : '';
+
+  const systemPrompt = `You are an expert STEM-capable educator. Explain the exact marked region in an image clearly and accurately. Prefer precise text, equations, tables, or concise examples over generating another image. Use Markdown. If math is needed, use valid LaTeX with inline math in $...$ and display math in $$...$$.`;
+  const userPrompt = `The image includes a red marker showing what the learner clicked in a ${modeLabel}.
+
+Learner intent: ${intent || 'Explain what is marked and why it matters.'}
+
+Drill-down context:
+${contextText || 'No prior context available.'}${uploadContextText}
+
+Respond with a focused Markdown learning page:
+- Start with a short title.
+- Identify what the marked region appears to be.
+- Answer the learner intent directly.
+- Include equations, definitions, or small tables when they help.
+- Put important equations on their own lines using $$...$$.
+- Mention uncertainty explicitly if the image does not provide enough information.
+- Do not describe the red marker itself except to identify the selected region.`;
+
+  const cfg = modelConfig.analysis;
+  try {
+    const text = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
+    return { text, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
+  } catch (err) {
+    if (cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
+      const text = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
+      return { text, source: 'grok (fallback)' };
+    }
+    throw err;
+  }
 }
 
 // --- Model config API ---
@@ -507,7 +615,7 @@ app.post('/api/upload', async (req, res) => {
 
     fs.writeFileSync(imagePath, pngBuffer);
 
-    pageMeta[id] = { folder, query: trimmedLabel, mode };
+    pageMeta[id] = { folder, query: trimmedLabel, mode, type: 'image', parentId: null };
     saveMetadata(pageMeta);
 
     console.log(`[upload] Saved: ${imagePath} (${pngBuffer.length} bytes)`);
@@ -515,6 +623,7 @@ app.post('/api/upload', async (req, res) => {
     res.json({
       page: {
         id,
+        type: 'image',
         imageUrl,
         parentId: null,
         parentClick: null,
@@ -528,10 +637,110 @@ app.post('/api/upload', async (req, res) => {
   }
 });
 
+async function generateUploadContextPage(uploadPageIdValue) {
+  const meta = pageMeta[uploadPageIdValue];
+  if (!meta) throw new Error('Upload page metadata not found');
+  if (meta.type !== 'image') throw new Error('Upload context can only be generated from image pages');
+
+  const contextId = uploadContextPageId(uploadPageIdValue);
+  const cached = loadPageContent(meta.folder, contextId);
+  if (cached) return cached;
+
+  const imagePath = path.join(GENERATED_DIR, meta.folder, `${uploadPageIdValue}.png`);
+  if (!fs.existsSync(imagePath)) throw new Error('Upload image file not found');
+
+  const resized = await sharp(imagePath)
+    .resize({ width: 1400, withoutEnlargement: true })
+    .png()
+    .toBuffer();
+  const imageBase64 = resized.toString('base64');
+
+  const systemPrompt = `You analyze uploaded educational images before learners drill into them. Identify text, equations, chart structure, diagrams, and likely learning targets. Use Markdown. Use valid LaTeX with inline math in $...$ and display math in $$...$$. Be precise and mark uncertainty.`;
+  const userPrompt = `Analyze this uploaded source image so future click-based drill-downs have context.
+
+Return a concise structured Markdown page with these sections:
+
+# Source Context
+
+## Image Type
+Classify the image, choosing from handwritten_math, printed_math, chart, graph, diagram, screenshot, photograph, mixed, or unknown. Briefly explain why.
+
+## Transcription
+Transcribe all visible text, labels, equations, axis names, legends, annotations, and headings. Preserve math as LaTeX where possible. If handwritten or unclear, say what is uncertain.
+
+## Structure
+Describe the spatial layout and important regions from top to bottom and left to right.
+
+## Key Concepts
+List the main concepts, variables, relationships, or data patterns the learner is likely working with.
+
+## Suggested Drill Targets
+List 4-8 specific regions a learner might click, with what each drill-down should explain.`;
+
+  const result = await analyzeImage(imageBase64, systemPrompt, userPrompt);
+  const page = {
+    id: contextId,
+    type: 'markdown',
+    title: 'Source context',
+    content: result.text,
+    source: result.source,
+    parentId: uploadPageIdValue,
+    parentClick: null,
+    initialQuery: meta.query,
+    mode: meta.mode,
+    intent: 'Analyze uploaded source image',
+    generatedAt: new Date().toISOString(),
+  };
+
+  savePageContent(meta.folder, contextId, page);
+  pageMeta[contextId] = {
+    folder: meta.folder,
+    query: meta.query,
+    mode: meta.mode,
+    type: 'upload_context',
+    parentId: uploadPageIdValue,
+    parentClick: null,
+    intent: page.intent,
+  };
+  pageMeta[uploadPageIdValue] = { ...meta, contextPageId: contextId };
+  saveMetadata(pageMeta);
+  console.log(`[context] Saved upload context: ${pageJsonPath(meta.folder, contextId)}`);
+  return page;
+}
+
+app.get('/api/context/:pageId', (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
+    return res.status(400).json({ error: 'Invalid page ID' });
+  }
+  const meta = pageMeta[pageId];
+  if (!meta) return res.status(404).json({ error: 'Page not found in metadata' });
+  const contextId = meta.contextPageId || (meta.type === 'upload_context' ? pageId : null);
+  const context = contextId ? loadPageContent(meta.folder, contextId) : null;
+  res.json({ page: context });
+});
+
+app.post('/api/context/:pageId', async (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
+    return res.status(400).json({ error: 'Invalid page ID' });
+  }
+
+  try {
+    const page = await enqueueGeneration(() => generateUploadContextPage(pageId));
+    res.json({ page });
+  } catch (err) {
+    console.error('Context generation error:', err.message);
+    res.status(500).json({ error: `Context generation failed: ${err.message}` });
+  }
+});
+
 // --- Page generation API ---
 
 app.post('/api/page', async (req, res) => {
-  const { query, parentId, parentClick, mode: reqMode } = req.body;
+  const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind } = req.body;
+  const responseKind = reqResponseKind === 'markdown' ? 'markdown' : 'image';
+  const intent = typeof reqIntent === 'string' ? reqIntent.trim().slice(0, 500) : '';
 
   const isFirst = typeof query === 'string';
   const isChild = typeof parentId === 'string' && parentClick && typeof parentClick.x === 'number' && typeof parentClick.y === 'number';
@@ -578,7 +787,7 @@ app.post('/api/page', async (req, res) => {
       } else {
         const rx = Math.round(parentClick.x * 100) / 100;
         const ry = Math.round(parentClick.y * 100) / 100;
-        id = childPageId(parentId, rx, ry);
+        id = childPageId(parentId, rx, ry, responseKind, intent);
         parentPageId = parentId;
         parentClickData = { x: rx, y: ry };
         const parentMeta = pageMeta[parentId];
@@ -593,7 +802,7 @@ app.post('/api/page', async (req, res) => {
       const imageUrl = `/generated/${folder}/${id}.png`;
 
       if (fs.existsSync(imagePath) && fs.statSync(imagePath).size > 0) {
-        return { id, imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode };
+        return { id, type: 'image', imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode };
       }
 
       let imageBuffer;
@@ -606,15 +815,41 @@ app.post('/api/page', async (req, res) => {
         if (!fs.existsSync(parentPath)) throw new Error('Parent image not found');
         console.log(`[${mode}] Generating child page: ${parentId} @ (${parentClickData.x}, ${parentClickData.y}) -> ${folder}/${id}`);
         const composited = await compositeRedMarker(parentPath, parentClick.x, parentClick.y);
-        imageBuffer = await generateChildPage(composited, mode);
+        const contextTrail = buildContextTrail(parentId);
+        if (responseKind === 'markdown') {
+          const textPath = pageJsonPath(folder, id);
+          if (fs.existsSync(textPath)) {
+            const cached = loadPageContent(folder, id);
+            if (cached) return cached;
+          }
+          const result = await generateTextDrillPage(composited, mode, intent, contextTrail);
+          const page = {
+            id,
+            type: 'markdown',
+            title: intent || 'Drill-down explanation',
+            content: result.text,
+            source: result.source,
+            parentId: parentPageId,
+            parentClick: parentClickData,
+            initialQuery,
+            mode,
+            intent,
+          };
+          savePageContent(folder, id, page);
+          pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'markdown', parentId, parentClick: parentClickData, intent };
+          saveMetadata(pageMeta);
+          console.log(`Saved: ${textPath}`);
+          return page;
+        }
+        imageBuffer = await generateChildPage(composited, mode, intent, contextTrail);
       }
 
       fs.writeFileSync(imagePath, imageBuffer);
-      pageMeta[id] = { folder, query: initialQuery || pageMeta[parentId]?.query, mode };
+      pageMeta[id] = { folder, query: initialQuery || pageMeta[parentId]?.query, mode, type: 'image', parentId: parentPageId, parentClick: parentClickData, intent };
       saveMetadata(pageMeta);
       console.log(`Saved: ${imagePath} (${imageBuffer.length} bytes)`);
 
-      return { id, imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode };
+      return { id, type: 'image', imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode };
     });
 
     res.json({ page });
@@ -844,6 +1079,7 @@ app.get('/api/gallery', (_req, res) => {
     const entries = fs.readdirSync(GENERATED_DIR, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('_')) continue;
       const folderPath = path.join(GENERATED_DIR, entry.name);
       const images = fs.readdirSync(folderPath)
         .filter(f => f.endsWith('.png'))
@@ -854,17 +1090,43 @@ app.get('/api/gallery', (_req, res) => {
           return { id: pageId, filename: f, url: `/generated/${entry.name}/${f}`, size: stat.size, created: stat.birthtime, mode: meta.mode || 'illustration' };
         })
         .sort((a, b) => new Date(a.created) - new Date(b.created));
+      const texts = fs.readdirSync(folderPath)
+        .filter(f => f.endsWith('.json'))
+        .map(f => {
+          const stat = fs.statSync(path.join(folderPath, f));
+          const pageId = f.replace('.json', '');
+          const meta = pageMeta[pageId] || {};
+          const content = loadPageContent(entry.name, pageId) || {};
+          return {
+            id: pageId,
+            filename: f,
+            title: content.title || meta.intent || 'Text drill-down',
+            size: stat.size,
+            created: stat.birthtime,
+            mode: meta.mode || 'illustration',
+          };
+        })
+        .sort((a, b) => new Date(a.created) - new Date(b.created));
 
       const firstMeta = Object.values(pageMeta).find(m => m.folder === entry.name);
       folders.push({
         name: entry.name, query: firstMeta?.query || entry.name, mode: firstMeta?.mode || 'illustration',
-        path: folderPath, images, imageCount: images.length, totalSize: images.reduce((sum, img) => sum + img.size, 0),
+        path: folderPath,
+        images,
+        texts,
+        imageCount: images.length,
+        textCount: texts.length,
+        totalSize: images.reduce((sum, img) => sum + img.size, 0) + texts.reduce((sum, text) => sum + text.size, 0),
       });
     }
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
-  folders.sort((a, b) => new Date(b.images[0]?.created || 0) - new Date(a.images[0]?.created || 0));
+  folders.sort((a, b) => {
+    const aCreated = [...a.images, ...a.texts].sort((x, y) => new Date(y.created) - new Date(x.created))[0]?.created || 0;
+    const bCreated = [...b.images, ...b.texts].sort((x, y) => new Date(y.created) - new Date(x.created))[0]?.created || 0;
+    return new Date(bCreated) - new Date(aCreated);
+  });
   res.json({ generatedDir: GENERATED_DIR, folders });
 });
 

@@ -44,6 +44,8 @@
   .canvas-area.empty { color: #bbb; font-size: 15px; font-style: italic; }
   .canvas-area.generating { color: #777; font-size: 15px; flex-direction: column; gap: 14px; }
   .canvas-area.generating .spinner-large { width: 36px; height: 36px; border: 4px solid #ddd; border-top-color: #5a7d6a; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  .status-note { position: fixed; right: 16px; bottom: 84px; z-index: 20; background: #fff; border: 1px solid #e0dcd7; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.12); padding: 9px 12px; font-size: 12px; color: #6b5a3e; display: flex; align-items: center; gap: 8px; max-width: min(360px, calc(100vw - 32px)); }
+  .status-note .spinner { width: 16px; height: 16px; border: 2px solid #ddd; border-top-color: #5a7d6a; border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
   .image-container { position: relative; max-width: 100%; max-height: 100%; }
   .image-container.clickable { cursor: crosshair; }
   .image-container img { display: block; max-width: 100%; max-height: calc(100vh - 260px); border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
@@ -58,10 +60,18 @@
   @keyframes marker-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }
 
   /* Confirm bar */
-  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 6; background: #fff; padding: 8px 16px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; }
+  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: minmax(220px, 1fr) auto auto auto; gap: 8px; z-index: 6; background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; width: min(760px, calc(100vw - 48px)); }
+  .confirm-intent { min-width: 0; padding: 6px 10px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 13px; outline: none; }
+  .confirm-intent:focus { border-color: #999; }
   .confirm-bar .btn { font-size: 13px; padding: 6px 18px; }
   .confirm-bar .btn.confirm-go { background: #5a7d6a; color: #fff; border-color: #5a7d6a; }
   .confirm-bar .btn.confirm-go:hover { background: #4a6a58; }
+  .confirm-bar .btn.confirm-text { background: #6b5a3e; color: #fff; border-color: #6b5a3e; }
+  .confirm-bar .btn.confirm-text:hover { background: #58492f; }
+  @media (max-width: 720px) {
+    .confirm-bar { grid-template-columns: 1fr 1fr; }
+    .confirm-intent { grid-column: 1 / -1; }
+  }
 
   /* --- Error banner --- */
   .error-banner { display: none; padding: 6px 20px; background: #fef2f2; color: #b91c1c; font-size: 12px; text-align: center; border-top: 1px solid #fecaca; flex-shrink: 0; }
@@ -75,6 +85,27 @@
   .thumb.active { border-color: #5a7d6a; opacity: 1; box-shadow: 0 0 0 1px #5a7d6a; }
   .thumb-index { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
   .thumb-index span { font-size: 10px; color: #999; }
+  .text-thumb { width: 88px; height: 50px; border-radius: 4px; border: 2px solid transparent; cursor: pointer; flex-shrink: 0; opacity: 0.65; transition: all 0.15s; background: #fff; color: #6b5a3e; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: inset 0 0 0 1px #e8e4df; }
+  .text-thumb:hover { opacity: 0.9; }
+  .text-thumb.active { border-color: #5a7d6a; opacity: 1; box-shadow: 0 0 0 1px #5a7d6a; }
+
+  /* --- Text pages --- */
+  .text-page { width: min(840px, 100%); max-height: calc(100vh - 260px); overflow-y: auto; background: #fff; border: 1px solid #e8e4df; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); padding: 28px 34px; }
+  .text-page-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 12px; margin-bottom: 18px; border-bottom: 1px solid #e8e4df; }
+  .text-page-title { font-size: 18px; font-weight: 700; color: #333; }
+  .text-page-kind { font-size: 11px; color: #8a785d; background: #f5efe4; border: 1px solid #e6d8bf; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+  .text-page-content { font-size: 15px; line-height: 1.7; color: #3d3a36; }
+  .text-page-content h1 { font-size: 22px; margin: 0 0 12px; }
+  .text-page-content h2 { font-size: 17px; margin: 20px 0 8px; color: #333; }
+  .text-page-content p { margin-bottom: 12px; }
+  .text-page-content ul, .text-page-content ol { margin: 0 0 12px 24px; }
+  .text-page-content li { margin-bottom: 5px; }
+  .text-page-content code { font-family: monospace; background: #f0ede8; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+  .text-page-content mjx-container[jax="CHTML"][display="true"],
+  .learn-content mjx-container[jax="CHTML"][display="true"] { margin: 14px 0; overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+  .text-page-content mjx-container,
+  .learn-content mjx-container { font-size: 105%; }
+  .text-page-source { margin-top: 18px; font-size: 11px; color: #aaa; text-align: right; }
 
   /* --- Slide panels (gallery, settings) --- */
   .panel-overlay { display: none; position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.3); }
@@ -101,6 +132,10 @@
   .gallery-img-card:hover { border-color: #aaa; }
   .gallery-img-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
   .gallery-img-meta { font-size: 9px; color: #999; padding: 3px 6px; font-family: monospace; display: flex; justify-content: space-between; }
+  .gallery-texts { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; padding: 0 12px 10px; }
+  .gallery-text-card { border-radius: 4px; border: 1px solid #e8e4df; background: #fff; padding: 8px 10px; }
+  .gallery-text-title { font-size: 12px; font-weight: 600; color: #4b4032; line-height: 1.3; margin-bottom: 5px; }
+  .gallery-text-meta { font-size: 9px; color: #999; font-family: monospace; display: flex; justify-content: space-between; gap: 8px; }
 
   /* Settings panel */
   .setting-group { margin-bottom: 20px; }
@@ -141,6 +176,21 @@
   .learn-content code { font-family: monospace; background: #f0ede8; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
   .learn-timestamp { font-size: 11px; color: #bbb; text-align: right; margin-top: 16px; font-style: italic; }
 </style>
+<script>
+  window.MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      processEscapes: true,
+      processEnvironments: true
+    },
+    options: {
+      skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+    },
+    startup: { typeset: false }
+  };
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 </head>
 <body>
 
@@ -175,6 +225,7 @@
 <div class="canvas-area empty" id="canvasArea">
   Type a topic above — or upload your own image to start drilling into it
 </div>
+<div class="status-note" id="statusNote" style="display:none;"></div>
 
 <div class="thumbnail-strip hidden" id="thumbnailStrip"></div>
 
@@ -220,6 +271,29 @@ const state = {
 
 const $ = id => document.getElementById(id);
 
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderMath(root = document.body) {
+  if (!window.MathJax?.typesetPromise) return;
+  window.MathJax.typesetClear?.([root]);
+  window.MathJax.typesetPromise([root]).catch(err => {
+    console.warn('MathJax render failed:', err);
+  });
+}
+
+function normalizeMathText(text) {
+  return String(text || '')
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_m, expr) => `$$${expr.trim()}$$`)
+    .replace(/\$\\frac/g, '$\\frac')
+    .replace(/([,.;:])\s*\$(\s+)/g, '$1$2');
+}
+
 const PLACEHOLDERS = {
   illustration: "Type a topic... e.g. 'how volcanoes work'",
   historical_map: "Type a topic... e.g. 'Roman Empire at its peak'",
@@ -239,6 +313,8 @@ function setLoading(loading) {
 
 function showError(msg) { $('errorBanner').textContent = msg; $('errorBanner').classList.add('visible'); }
 function clearError() { $('errorBanner').classList.remove('visible'); }
+function showStatus(msg) { $('statusNote').innerHTML = `<span class="spinner"></span>${escapeHtml(msg)}`; $('statusNote').style.display = 'flex'; }
+function clearStatus() { $('statusNote').style.display = 'none'; $('statusNote').innerHTML = ''; }
 
 function updateUI() {
   const { pages, currentIndex, loading } = state;
@@ -246,8 +322,8 @@ function updateUI() {
   $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
   $('backBtn').disabled = currentIndex <= 0 || loading;
   $('resetBtn').disabled = !hasPages || loading;
-  $('drillBtn').disabled = !hasPages || loading;
-  $('learnBtn').disabled = !hasPages || loading;
+  $('drillBtn').disabled = !hasPages || loading || pages[currentIndex]?.type === 'markdown';
+  $('learnBtn').disabled = !hasPages || loading || pages[currentIndex]?.type === 'markdown';
   $('drillBtn').classList.toggle('active', state.drillMode);
 
   if (hasPages) {
@@ -256,18 +332,26 @@ function updateUI() {
     pages.forEach((page, i) => {
       const wrapper = document.createElement('div');
       wrapper.className = 'thumb-index';
-      const img = document.createElement('img');
-      img.className = `thumb${i === currentIndex ? ' active' : ''}`;
-      img.src = page.imageUrl;
-      img.alt = `Page ${i + 1}`;
-      img.onclick = () => { if (!state.loading) { state.currentIndex = i; state.pendingClick = null; renderCurrentPage(); updateUI(); } };
+      let thumb;
+      if (page.type === 'markdown') {
+        thumb = document.createElement('div');
+        thumb.className = `text-thumb${i === currentIndex ? ' active' : ''}`;
+        thumb.textContent = 'T';
+        thumb.title = page.title || 'Text page';
+      } else {
+        thumb = document.createElement('img');
+        thumb.className = `thumb${i === currentIndex ? ' active' : ''}`;
+        thumb.src = page.imageUrl;
+        thumb.alt = `Page ${i + 1}`;
+      }
+      thumb.onclick = () => { if (!state.loading) { state.currentIndex = i; state.pendingClick = null; renderCurrentPage(); updateUI(); } };
       const label = document.createElement('span');
       label.textContent = i + 1;
-      wrapper.appendChild(img);
+      wrapper.appendChild(thumb);
       wrapper.appendChild(label);
       $('thumbnailStrip').appendChild(wrapper);
     });
-    const active = $('thumbnailStrip').querySelector('.thumb.active');
+    const active = $('thumbnailStrip').querySelector('.thumb.active, .text-thumb.active');
     if (active) active.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   } else {
     $('thumbnailStrip').classList.add('hidden');
@@ -285,6 +369,22 @@ function renderCurrentPage() {
 
   canvas.className = 'canvas-area';
   canvas.innerHTML = '';
+
+  if (page.type === 'markdown') {
+    const article = document.createElement('article');
+    article.className = 'text-page';
+    article.innerHTML = `
+      <div class="text-page-header">
+        <div class="text-page-title">${escapeHtml(page.title || 'Drill-down explanation')}</div>
+        <div class="text-page-kind">Text response</div>
+      </div>
+      <div class="text-page-content">${simpleMarkdown(page.content || '')}</div>
+      ${page.source ? `<div class="text-page-source">Generated via ${escapeHtml(page.source)}</div>` : ''}
+    `;
+    canvas.appendChild(article);
+    renderMath(article);
+    return;
+  }
 
   const container = document.createElement('div');
   container.className = `image-container${state.drillMode ? ' clickable' : ''}`;
@@ -326,22 +426,43 @@ function renderCurrentPage() {
     // Confirm bar
     const bar = document.createElement('div');
     bar.className = 'confirm-bar';
+    const intentInput = document.createElement('input');
+    intentInput.className = 'confirm-intent';
+    intentInput.type = 'text';
+    intentInput.placeholder = 'Optional question or goal for this spot';
+    intentInput.maxLength = 500;
+    intentInput.value = state.pendingClick.intent || '';
+
     const goBtn = document.createElement('button');
     goBtn.className = 'btn confirm-go';
-    goBtn.textContent = 'Drill here';
+    goBtn.textContent = 'Image';
     goBtn.onclick = () => {
       const { x, y } = state.pendingClick;
+      const intent = intentInput.value.trim();
       state.pendingClick = null;
       state.drillMode = false;
-      generateChildPage(page.id, x, y);
+      generateChildPage(page.id, x, y, 'image', intent);
+    };
+    const textBtn = document.createElement('button');
+    textBtn.className = 'btn confirm-text';
+    textBtn.textContent = 'Text';
+    textBtn.onclick = () => {
+      const { x, y } = state.pendingClick;
+      const intent = intentInput.value.trim();
+      state.pendingClick = null;
+      state.drillMode = false;
+      generateChildPage(page.id, x, y, 'markdown', intent);
     };
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn';
     cancelBtn.textContent = 'Cancel';
     cancelBtn.onclick = () => { state.pendingClick = null; renderCurrentPage(); };
+    bar.appendChild(intentInput);
     bar.appendChild(goBtn);
+    bar.appendChild(textBtn);
     bar.appendChild(cancelBtn);
     container.appendChild(bar);
+    requestAnimationFrame(() => intentInput.focus());
   }
 
   // Loading overlay
@@ -378,22 +499,44 @@ async function generateFirstPage(query) {
   finally { setLoading(false); }
 }
 
-async function generateChildPage(parentId, x, y) {
+async function generateChildPage(parentId, x, y, responseKind = 'image', intent = '') {
   clearError();
   setLoading(true);
   try {
     const res = await fetch('/api/page', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parentId, parentClick: { x, y } }),
+      body: JSON.stringify({ parentId, parentClick: { x, y }, responseKind, intent }),
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
     const { page } = await res.json();
-    state.pages = state.pages.slice(0, state.currentIndex + 1);
     state.pages.push(page);
     state.currentIndex = state.pages.length - 1;
     clearError();
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
+}
+
+async function generateUploadContext(pageId) {
+  showStatus('Analyzing upload context...');
+  try {
+    const res = await fetch(`/api/context/${pageId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
+    const { page } = await res.json();
+    if (page && !state.pages.some(p => p.id === page.id)) {
+      state.pages.push(page);
+      state.currentIndex = state.pages.length - 1;
+      renderCurrentPage();
+      updateUI();
+    }
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    clearStatus();
+  }
 }
 
 // --- Upload ---
@@ -421,7 +564,10 @@ async function uploadImage(file) {
     const { page } = await res.json();
     state.pages = [page];
     state.currentIndex = 0;
+    renderCurrentPage();
+    updateUI();
     clearError();
+    await generateUploadContext(page.id);
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
 }
@@ -440,12 +586,20 @@ async function openGallery() {
     let html = `<div class="gallery-base-path">${data.generatedDir}</div>`;
     for (const f of data.folders) {
       const isMap = f.mode === 'historical_map';
-      html += `<div class="gallery-folder"><div class="gallery-folder-header"><span class="gallery-folder-title">${f.query}</span><span class="gallery-folder-meta"><span class="mode-tag${isMap?' map':''}">${isMap?'map':'illustration'}</span>${f.imageCount} images<span>${formatBytes(f.totalSize)}</span></span></div>`;
+      html += `<div class="gallery-folder"><div class="gallery-folder-header"><span class="gallery-folder-title">${escapeHtml(f.query)}</span><span class="gallery-folder-meta"><span class="mode-tag${isMap?' map':''}">${isMap?'map':'illustration'}</span>${f.imageCount} images${f.textCount ? ` · ${f.textCount} text` : ''}<span>${formatBytes(f.totalSize)}</span></span></div>`;
       html += `<div class="gallery-folder-path">${f.path}</div><div class="gallery-images">`;
       for (const img of f.images) {
         html += `<div class="gallery-img-card" onclick="window.open('${img.url}','_blank')"><img src="${img.url}" loading="lazy"><div class="gallery-img-meta"><span>${img.id.slice(0,8)}...</span><span>${formatBytes(img.size)}</span></div></div>`;
       }
-      html += '</div></div>';
+      html += '</div>';
+      if (f.texts?.length) {
+        html += '<div class="gallery-texts">';
+        for (const text of f.texts) {
+          html += `<div class="gallery-text-card"><div class="gallery-text-title">${escapeHtml(text.title || 'Text drill-down')}</div><div class="gallery-text-meta"><span>${text.id.slice(0,8)}...</span><span>${formatBytes(text.size)}</span></div></div>`;
+        }
+        html += '</div>';
+      }
+      html += '</div>';
     }
     $('galleryBody').innerHTML = html;
   } catch (err) { $('galleryBody').innerHTML = `<p style="color:#b91c1c">Error: ${err.message}</p>`; }
@@ -526,8 +680,9 @@ let learnAnalyzing = false;
 
 function simpleMarkdown(text) {
   if (!text) return '';
-  return text
+  return normalizeMathText(text)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^- \*\*(.+?)\*\*:\s?(.*)$/gm, '<li><strong>$1</strong>: $2</li>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
@@ -576,9 +731,10 @@ function renderLearnTab() {
 
   if (content) {
     const source = learnActiveTab === 'description' ? data.descriptionSource : data.explanationSource;
-    const sourceLabel = source === 'grok' ? 'via Grok API' : 'via local Gemma';
+    const sourceLabel = source?.includes('fallback') || source?.includes('xai') || source === 'grok' ? 'via Grok API' : 'via local Gemma';
     body.innerHTML = `<div class="learn-content">${simpleMarkdown(content)}</div>` +
       (timestamp ? `<div class="learn-timestamp">Analyzed ${new Date(timestamp).toLocaleString()} (${sourceLabel})</div>` : '');
+    renderMath(body);
     return;
   }
 
