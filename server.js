@@ -319,6 +319,25 @@ function loadModes() {
 let MODES = loadModes();
 let VALID_MODES = Object.keys(MODES);
 
+function inferModeFromQuery(query) {
+  const text = normalize(query);
+  const hasMode = id => VALID_MODES.includes(id);
+
+  if (hasMode('historical_map') && /\b(map|atlas|territor|empire|kingdom|dynasty|border|migration|trade route|campaign|battle|war|invasion|colonial|ancient|medieval|revolution|civilization|rome|roman|mongol|ottoman|byzantine|aztec|inca|maya)\b/.test(text)) {
+    return 'historical_map';
+  }
+
+  if (hasMode('math_equation') && /(\b(equation|formula|theorem|proof|derive|derivative|integral|calculus|algebra|geometry|matrix|vector|probability|statistics|function|graph|slope|limit|variable|polynomial|trigonometry)\b|[=∫∑√π])/.test(text)) {
+    return 'math_equation';
+  }
+
+  if (hasMode('science_process') && /\b(process|cycle|reaction|molecule|cell|organ|anatomy|photosynthesis|respiration|ecosystem|climate|weather|volcano|earthquake|plate tectonic|evolution|gravity|force|energy|electricity|magnetism|atom|protein|dna|rna|enzyme|immune|planet|star|orbit)\b/.test(text)) {
+    return 'science_process';
+  }
+
+  return hasMode('illustration') ? 'illustration' : VALID_MODES[0];
+}
+
 function publicMode(mode) {
   return {
     id: mode.id,
@@ -598,9 +617,7 @@ async function generateChildPage(compositedImageBuffer, mode, intent = '', conte
   const intentPrompt = intent
     ? `\n\nLearner intent for this drill-down: ${intent}\nUse that intent to decide what details to reveal while still focusing on the marked region.`
     : '';
-  const sourcePrompt = uploadContext?.content
-    ? `\n\nSource upload analysis for context:\n${uploadContext.content.slice(0, 2500)}`
-    : '';
+  const sourcePrompt = uploadContextPrompt(uploadContext, 2500);
   const prompt = renderTemplate(modeConfig.childPageTemplate, { style: modeConfig.style }) + intentPrompt + sourcePrompt;
   return callEditing(prompt, compositedImageBuffer);
 }
@@ -672,6 +689,14 @@ function findNearestUploadContext(pageId) {
   return null;
 }
 
+function uploadContextPrompt(uploadContext, maxChars = 5000) {
+  if (!uploadContext?.content) return '';
+  return `\n\nSource upload OCR/transcription and analysis:
+${uploadContext.content.slice(0, maxChars)}
+
+Use this source context as primary evidence for uploaded images, especially visible text, labels, equations, axis names, legends, and table/chart structure. If the focused crop is ambiguous, prefer values and labels supported by this context and explicitly mark uncertainty.`;
+}
+
 async function generateTextDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
   const imageBase64 = compositedImageBuffer.toString('base64');
   const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
@@ -681,9 +706,7 @@ async function generateTextDrillPage(compositedImageBuffer, mode, intent, contex
     const intentText = item.intent ? ` Intent: ${item.intent}` : '';
     return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
   }).join('\n');
-  const uploadContextText = uploadContext?.content
-    ? `\n\nSource upload analysis:\n${uploadContext.content.slice(0, 5000)}`
-    : '';
+  const uploadContextText = uploadContextPrompt(uploadContext);
 
   const systemPrompt = `You are an expert STEM-capable educator. Explain only the exact selected region in an image, not the image as a whole. Prefer precise text, equations, tables, or concise examples over generating another image. Use Markdown. If math is needed, use valid LaTeX with inline math in $...$ and display math in $$...$$.`;
   const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
@@ -734,24 +757,94 @@ function parseJsonResponse(text) {
 function normalizeChartSpec(spec) {
   const chart = spec && typeof spec === 'object' ? spec : {};
   const type = ['line', 'bar', 'scatter'].includes(chart.type) ? chart.type : 'line';
+  const chartability = ['high', 'medium', 'low'].includes(chart.chartability) ? chart.chartability : 'medium';
+  const fallbackRecommendation = ['chart', 'table', 'text', 'diagram'].includes(chart.fallbackRecommendation)
+    ? chart.fallbackRecommendation
+    : (chartability === 'low' ? 'text' : 'chart');
+  const confidence = Number.isFinite(Number(chart.confidence))
+    ? Math.max(0, Math.min(1, Number(chart.confidence)))
+    : null;
   const points = Array.isArray(chart.points) ? chart.points
     .map((point, index) => ({
       label: String(point.label ?? point.x ?? index + 1),
       x: Number.isFinite(Number(point.x)) ? Number(point.x) : index,
       y: Number.isFinite(Number(point.y)) ? Number(point.y) : 0,
+      evidence: String(point.evidence || '').slice(0, 240),
+      confidence: Number.isFinite(Number(point.confidence)) ? Math.max(0, Math.min(1, Number(point.confidence))) : null,
     }))
     .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
     .slice(0, 80) : [];
 
   return {
     type,
+    chartability,
+    fallbackRecommendation,
+    requiresUserConfirmation: Boolean(chart.requiresUserConfirmation),
+    confidence,
     title: String(chart.title || 'Chart drill-down').slice(0, 120),
     xLabel: String(chart.xLabel || 'x').slice(0, 80),
     yLabel: String(chart.yLabel || 'y').slice(0, 80),
     points,
+    sourceEvidence: Array.isArray(chart.sourceEvidence) ? chart.sourceEvidence.map(item => String(item).slice(0, 240)).filter(Boolean).slice(0, 8) : [],
     notes: Array.isArray(chart.notes) ? chart.notes.map(note => String(note).slice(0, 240)).slice(0, 6) : [],
     uncertainty: String(chart.uncertainty || '').slice(0, 500),
   };
+}
+
+function validateChartSpec(chart) {
+  const issues = [];
+  if (!['line', 'bar', 'scatter'].includes(chart.type)) issues.push('Chart type must be line, bar, or scatter.');
+  if (!['high', 'medium', 'low'].includes(chart.chartability)) issues.push('chartability must be high, medium, or low.');
+  if (!['chart', 'table', 'text', 'diagram'].includes(chart.fallbackRecommendation)) issues.push('fallbackRecommendation must be chart, table, text, or diagram.');
+  if (chart.chartability !== 'low' && chart.points.length < 2) issues.push('A chartable response needs at least two plotted points.');
+  if (chart.chartability === 'low' && chart.fallbackRecommendation === 'chart') issues.push('Low chartability needs a non-chart fallbackRecommendation.');
+  if (chart.chartability !== 'low' && (!chart.title || chart.title === 'Chart drill-down')) issues.push('Chart title is missing or generic.');
+  if (chart.chartability !== 'low' && (!chart.xLabel || chart.xLabel === 'x' || !chart.yLabel || chart.yLabel === 'y')) {
+    issues.push('Axis labels are missing or generic.');
+  }
+  const missingEvidence = chart.points.filter(point => !point.evidence).length;
+  if (chart.chartability !== 'low' && missingEvidence) issues.push(`${missingEvidence} plotted point(s) lack evidence.`);
+  const missingConfidence = chart.points.filter(point => point.confidence === null).length;
+  if (chart.chartability !== 'low' && missingConfidence) issues.push(`${missingConfidence} plotted point(s) lack confidence.`);
+  if (chart.confidence !== null && chart.confidence < 0.45 && chart.chartability === 'high') {
+    issues.push('Overall confidence is too low for high chartability.');
+  }
+  if (chart.requiresUserConfirmation && !chart.uncertainty) issues.push('requiresUserConfirmation is true but uncertainty is blank.');
+
+  return {
+    issues,
+    shouldRetry: issues.some(issue => (
+      issue.includes('at least two') ||
+      issue.includes('generic') ||
+      issue.includes('lack evidence') ||
+      issue.includes('lack confidence') ||
+      issue.includes('non-chart')
+    )),
+  };
+}
+
+function chartFallbackMarkdown(chart) {
+  const recommendation = chart.fallbackRecommendation && chart.fallbackRecommendation !== 'chart'
+    ? chart.fallbackRecommendation
+    : 'text';
+  const evidence = [
+    ...(chart.sourceEvidence || []),
+    ...(chart.points || []).filter(point => point.evidence).map(point => `${point.label}: ${point.evidence}`),
+  ].slice(0, 8);
+  const notes = chart.notes || [];
+  const validation = chart.validationIssues || [];
+  return `# Chart Not Recommended
+
+The selected region does not have enough reliable chart evidence to render a trustworthy chart.
+
+**Recommended format:** ${recommendation}
+
+${chart.uncertainty ? `**Uncertainty:** ${chart.uncertainty}\n` : ''}
+${chart.confidence !== null ? `**Model confidence:** ${Math.round(chart.confidence * 100)}%\n` : ''}
+
+${evidence.length ? `## Evidence\n${evidence.map(item => `- ${item}`).join('\n')}\n` : ''}
+${notes.length ? `## Notes\n${notes.map(item => `- ${item}`).join('\n')}\n` : ''}
+${validation.length ? `## Validation Notes\n${validation.map(item => `- ${item}`).join('\n')}\n` : ''}`;
 }
 
 function normalizeTableSpec(spec) {
@@ -814,11 +907,9 @@ async function generateChartDrillPage(compositedImageBuffer, mode, intent, conte
     const intentText = item.intent ? ` Intent: ${item.intent}` : '';
     return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
   }).join('\n');
-  const uploadContextText = uploadContext?.content
-    ? `\n\nSource upload analysis:\n${uploadContext.content.slice(0, 5000)}`
-    : '';
+  const uploadContextText = uploadContextPrompt(uploadContext);
 
-  const systemPrompt = `You convert only the exact selected image region into a simple educational chart specification. Return JSON only. Use inferred or approximate values only when the selected region and context support them, and describe uncertainty.`;
+  const systemPrompt = `You convert only the exact selected image region into a simple educational chart specification. Return JSON only. Use inferred or approximate values only when the selected region, OCR/transcription context, and surrounding page context support them. Describe uncertainty and cite evidence for every plotted point.`;
   const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
 
 Focus on the feature at the center of the right zoomed panel. Use the full left panel only for context.
@@ -835,36 +926,71 @@ ${contextText || 'No prior context available.'}${uploadContextText}
 Return one JSON object only, with this shape:
 {
   "type": "line" | "bar" | "scatter",
+  "chartability": "high" | "medium" | "low",
+  "fallbackRecommendation": "chart" | "table" | "text" | "diagram",
+  "requiresUserConfirmation": false,
+  "confidence": 0.0,
   "title": "short chart title",
   "xLabel": "x axis label",
   "yLabel": "y axis label",
   "points": [
-    { "label": "visible label", "x": 0, "y": 0 }
+    { "label": "visible label", "x": 0, "y": 0, "evidence": "visible source for this point", "confidence": 0.0 }
   ],
+  "sourceEvidence": ["short quote or visual cue used to build the chart"],
   "notes": ["short teaching note"],
   "uncertainty": "what is inferred or approximate"
 }
 
 Rules:
 - Use 2-20 points unless the image clearly supports more.
-- If the marked region is not numeric data, make a conceptual sequence chart using ordinal x values.
+- If the marked region is not numeric data, make a conceptual sequence chart using ordinal x values only when that chart would teach the selected region better than text/table/diagram.
+- Use chartability "low" when a chart would be misleading, when the evidence is too thin, or when a table/text/diagram is the better format.
+- Use fallbackRecommendation to name the better format when chartability is low.
+- Set requiresUserConfirmation to true when values are approximate, inferred, or need user review before being trusted.
+- Every point must include evidence and confidence.
 - Do not invent precision. Prefer simple approximate values and clear uncertainty.`;
 
   const cfg = modelConfig.analysis;
   let result;
+  let usedFallback = false;
   try {
     result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
   } catch (err) {
     if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
       result = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
-      const chart = normalizeChartSpec(parseJsonResponse(result));
-      return { chart, source: 'grok (fallback)' };
+      usedFallback = true;
+    } else {
+      throw err;
     }
-    throw err;
   }
 
-  const chart = normalizeChartSpec(parseJsonResponse(result));
-  return { chart, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
+  let chart = normalizeChartSpec(parseJsonResponse(result));
+  let validation = validateChartSpec(chart);
+  if (validation.shouldRetry) {
+    const retryPrompt = `${userPrompt}
+
+Your previous JSON failed validation:
+${validation.issues.map(issue => `- ${issue}`).join('\n')}
+
+Previous JSON:
+${JSON.stringify(chart, null, 2)}
+
+Return corrected JSON only. If the selected region cannot support a trustworthy chart, set chartability to "low", set fallbackRecommendation to the best non-chart format, leave points empty, and explain why in uncertainty.`;
+    const retryResult = await callVisionChat(
+      usedFallback ? 'xai' : cfg.provider,
+      usedFallback ? 'grok-4-1-fast-non-reasoning' : cfg.model,
+      imageBase64,
+      systemPrompt,
+      retryPrompt
+    );
+    chart = normalizeChartSpec(parseJsonResponse(retryResult));
+    validation = validateChartSpec(chart);
+  }
+
+  chart.validationIssues = validation.issues;
+  chart.isReliable = validation.issues.length === 0 && chart.chartability !== 'low';
+  const source = usedFallback ? 'grok (fallback)' : (cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`);
+  return { chart, source };
 }
 
 async function generateTableDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
@@ -876,11 +1002,9 @@ async function generateTableDrillPage(compositedImageBuffer, mode, intent, conte
     const intentText = item.intent ? ` Intent: ${item.intent}` : '';
     return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
   }).join('\n');
-  const uploadContextText = uploadContext?.content
-    ? `\n\nSource upload analysis:\n${uploadContext.content.slice(0, 5000)}`
-    : '';
+  const uploadContextText = uploadContextPrompt(uploadContext);
 
-  const systemPrompt = `You convert only the exact selected image region into a locally renderable educational table. Return JSON only. Preserve visible wording when extraction is requested.`;
+  const systemPrompt = `You convert only the exact selected image region into a locally renderable educational table. Return JSON only. Use uploaded OCR/transcription context as primary evidence for visible text, labels, equations, and values. Preserve visible wording when extraction is requested.`;
   const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
 
 Focus on the feature at the center of the right zoomed panel. Use the full left panel only for context.
@@ -936,11 +1060,9 @@ async function generateDiagramDrillPage(compositedImageBuffer, mode, intent, con
     const intentText = item.intent ? ` Intent: ${item.intent}` : '';
     return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
   }).join('\n');
-  const uploadContextText = uploadContext?.content
-    ? `\n\nSource upload analysis:\n${uploadContext.content.slice(0, 5000)}`
-    : '';
+  const uploadContextText = uploadContextPrompt(uploadContext);
 
-  const systemPrompt = `You convert only the exact selected image region into a locally renderable educational diagram specification. Return JSON only. The app will render the diagram itself as SVG; do not request image generation.`;
+  const systemPrompt = `You convert only the exact selected image region into a locally renderable educational diagram specification. Return JSON only. Use uploaded OCR/transcription context as primary evidence for visible text, labels, equations, and relationships. The app will render the diagram itself as SVG; do not request image generation.`;
   const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
 
 Focus on the feature at the center of the right zoomed panel. Use the full left panel only for context.
@@ -1101,7 +1223,7 @@ async function generateUploadContextPage(uploadPageIdValue) {
     .toBuffer();
   const imageBase64 = resized.toString('base64');
 
-  const systemPrompt = `You analyze uploaded educational images before learners drill into them. Identify text, equations, chart structure, diagrams, and likely learning targets. Use Markdown. Use valid LaTeX with inline math in $...$ and display math in $$...$$. Be precise and mark uncertainty.`;
+  const systemPrompt = `You analyze uploaded educational images before learners drill into them. Perform OCR-style extraction of visible text first, then identify equations, chart structure, diagrams, and likely learning targets. Use Markdown. Use valid LaTeX with inline math in $...$ and display math in $$...$$. Be precise and mark uncertainty.`;
   const userPrompt = `Analyze this uploaded source image so future click-based drill-downs have context.
 
 Return a concise structured Markdown page with these sections:
@@ -1111,8 +1233,11 @@ Return a concise structured Markdown page with these sections:
 ## Image Type
 Classify the image, choosing from handwritten_math, printed_math, chart, graph, diagram, screenshot, photograph, mixed, or unknown. Briefly explain why.
 
-## Transcription
-Transcribe all visible text, labels, equations, axis names, legends, annotations, and headings. Preserve math as LaTeX where possible. If handwritten or unclear, say what is uncertain.
+## OCR / Transcription
+Transcribe all visible text, labels, equations, axis names, legends, annotations, table cells, and headings. Preserve math as LaTeX where possible. If handwritten or unclear, say what is uncertain.
+
+## Chart And Data Extraction
+If the image includes a chart, graph, table, number line, axes, legend, or plotted marks, list the visible data structure, axis labels, units, categories, approximate values, and any uncertainty.
 
 ## Structure
 Describe the spatial layout and important regions from top to bottom and left to right.
@@ -1370,7 +1495,7 @@ app.post('/api/page', async (req, res) => {
   try {
     let mode = 'illustration';
     if (isFirst) {
-      mode = (reqMode && VALID_MODES.includes(reqMode)) ? reqMode : 'illustration';
+      mode = (reqMode && reqMode !== 'auto' && VALID_MODES.includes(reqMode)) ? reqMode : inferModeFromQuery(query);
     } else {
       const parentMeta = pageMeta[parentId];
       mode = parentMeta?.mode || 'illustration';
@@ -1454,6 +1579,28 @@ app.post('/api/page', async (req, res) => {
             if (cached) return cached;
           }
           const result = await generateChartDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language);
+          if (result.chart.chartability === 'low') {
+            const page = {
+              id,
+              type: 'markdown',
+              title: 'Chart not recommended',
+              content: chartFallbackMarkdown(result.chart),
+              source: result.source,
+              parentId: parentPageId,
+              parentClick: parentClickData,
+              initialQuery,
+              mode,
+              intent,
+              responseDepth,
+              language,
+              chart: result.chart,
+            };
+            savePageContent(folder, id, page);
+            pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'markdown', parentId, parentClick: parentClickData, intent, responseDepth, language };
+            saveMetadata(pageMeta);
+            console.log(`Saved: ${chartPath}`);
+            return page;
+          }
           const page = {
             id,
             type: 'chart',

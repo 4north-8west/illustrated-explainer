@@ -39,6 +39,18 @@ The system is useful for experimenting with:
 - chart/table/diagram response routing
 - local-first model workflows
 
+## What's New in 1.1.0 — Better Formatting
+
+This release focuses on layout, presentation, and the reliability of typed responses.
+
+- **Auto mode detection.** The Illustration / Historical Map mode toggle is gone. The server now infers the best mode (`illustration`, `historical_map`, `math_equation`, `science_process`) from keywords in your topic. The mode selector buttons have been removed from the UI.
+- **Three-column source-upload layout.** Uploaded images now render in a proper grid: extracted source content (Markdown summary, transcription, accordions of structured detail) on the left, the source image fixed in the center, and the latest drill-down result on the right.
+- **Persistent drill targets on the canvas.** Every previous drill-in point appears as a clickable red target on the image, with a count badge for repeat targets. Click any target to revisit that drill-down without re-running the model.
+- **Chart confidence and fallback routing.** Chart specs now include `chartability` (high / medium / low), per-point `evidence` and `confidence` (0–1), overall `confidence`, a `fallbackRecommendation` (chart / table / text / diagram), a `sourceEvidence` list, and a `requiresUserConfirmation` flag. Specs are validated server-side and either retried with a stronger prompt or routed to a more appropriate response type. The browser shows the reliability pill and any fallback notice inline above the chart.
+- **Full-screen layout.** The page now locks to the viewport height with internal scroll regions instead of the whole document scrolling. The drill button has a stronger accent treatment with a target glyph, and the confirm bar wraps responsively on narrow viewports.
+- **Improved upload-context prompts.** The shared upload-context helper explicitly frames upload context as OCR/transcription evidence (visible text, labels, equations, axis names, legends, table structure) and instructs the model to prefer source-grounded values over the focused crop when the crop is ambiguous.
+- **Removed redundant Context panel.** The standalone Context button has been retired; source context now lives directly in the new three-column layout where it is always visible alongside the image.
+
 ## Quick Start
 
 ```bash
@@ -134,6 +146,7 @@ This means image generation may intentionally fail while `Keep it local` is on. 
    - Markdown for text
    - JSON specs for charts, tables, and diagrams
 7. The browser renders typed responses locally.
+8. Each completed drill-in leaves a persistent red target marker on the canvas at the click location, with a count badge if the same point has been drilled multiple times. Clicking a target reopens its result without a new model call.
 
 ## Response Types
 
@@ -149,6 +162,17 @@ The browser renders math with MathJax.
 ### Chart
 
 Chart drill-downs ask the model for a small JSON chart spec. The browser renders the result as SVG. This is best for numeric trends, ordered sequences, comparisons, or conceptual progressions.
+
+As of 1.1.0, chart specs carry reliability metadata that the server validates and the UI surfaces:
+
+- `chartability` — `high`, `medium`, or `low`. Low chartability suppresses the chart and recommends another response type.
+- `confidence` — overall 0–1 score. High chartability with low confidence is rejected.
+- `fallbackRecommendation` — `chart`, `table`, `text`, or `diagram`. Used when chartability is low or validation fails.
+- per-point `evidence` and `confidence` — short justification and 0–1 score for each plotted point.
+- `sourceEvidence` — short list of supporting quotes or labels from the source image.
+- `requiresUserConfirmation` — set when the model is genuinely uncertain; the UI shows the uncertainty banner.
+
+If validation finds a low-quality spec (missing axis labels, fewer than two points on a chartable response, missing per-point evidence, etc.), the server retries with a stronger prompt or routes to the recommended fallback type.
 
 ### Table
 
@@ -183,7 +207,9 @@ Included modes:
 - `math_equation`
 - `science_process`
 
-To add a mode, create a new JSON file in `modes/` using the same structure. The server loads modes at startup.
+Modes are selected automatically by keyword inference from the topic query (1.1.0+). For example, queries containing `equation`, `theorem`, `derivative`, or symbols like `∫ ∑ √ π` route to `math_equation`; queries containing `empire`, `dynasty`, `migration`, or `trade route` route to `historical_map`. If no keywords match, the server falls back to `illustration`.
+
+To add a mode, create a new JSON file in `modes/` using the same structure. The server loads modes at startup. To make a new mode auto-route, extend the keyword regexes in `inferModeFromQuery()` in `server.js`.
 
 ## Project Structure
 

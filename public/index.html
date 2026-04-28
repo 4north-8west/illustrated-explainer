@@ -6,7 +6,7 @@
 <title>Illustrated Explainer</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Georgia', serif; background: #faf8f5; color: #333; min-height: 100vh; display: flex; flex-direction: column; }
+  body { font-family: 'Georgia', serif; background: #faf8f5; color: #333; height: 100vh; min-height: 620px; display: flex; flex-direction: column; overflow: hidden; }
 
   /* --- Top bar --- */
   .top-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e8e4df; flex-shrink: 0; gap: 12px; flex-wrap: wrap; }
@@ -16,20 +16,16 @@
   .btn { padding: 5px 14px; border: 1px solid #ccc; background: #fff; border-radius: 6px; font-family: inherit; font-size: 12px; cursor: pointer; color: #555; transition: all 0.15s; }
   .btn:hover:not(:disabled) { background: #f0ede8; border-color: #aaa; }
   .btn:disabled { opacity: 0.4; cursor: default; }
-  .btn.drill-btn.active { background: #5a7d6a; color: #fff; border-color: #5a7d6a; }
-  .btn.drill-btn.active:hover { background: #4a6a58; }
+  .btn.drill-btn { padding: 8px 20px; border-color: #a23b31; background: #fff7f5; color: #8f2d25; font-size: 13px; font-weight: 800; box-shadow: inset 0 0 0 1px rgba(162,59,49,0.08); }
+  .btn.drill-btn:not(:disabled)::before { content: "◎ "; font-weight: 700; }
+  .btn.drill-btn:hover:not(:disabled) { background: #fff1ef; border-color: #8f2d25; }
+  .btn.drill-btn.active { background: #a23b31; color: #fff; border-color: #a23b31; box-shadow: 0 0 0 2px rgba(162,59,49,0.18); }
+  .btn.drill-btn.active:hover { background: #842e28; }
   .global-language { width: 120px; padding: 5px 9px; border: 1px solid #ccc; border-radius: 6px; font-family: inherit; font-size: 12px; color: #555; background: #fff; }
 
   /* --- Topic area --- */
   .topic-area { display: flex; justify-content: center; padding: 14px 20px; flex-shrink: 0; }
   .topic-form { display: flex; gap: 8px; width: 100%; max-width: 700px; align-items: center; flex-wrap: wrap; }
-  .mode-selector { display: flex; gap: 0; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; flex-shrink: 0; }
-  .mode-btn { padding: 8px 14px; border: none; background: #fff; font-family: inherit; font-size: 12px; cursor: pointer; color: #888; transition: all 0.15s; border-right: 1px solid #e8e4df; }
-  .mode-btn:last-child { border-right: none; }
-  .mode-btn:hover:not(.active) { background: #f7f5f2; color: #555; }
-  .mode-btn.active { background: #5a7d6a; color: #fff; }
-  .mode-btn.active.map-mode { background: #6b5a3e; }
-  .mode-btn:disabled { opacity: 0.5; cursor: default; }
   .topic-input { flex: 1; min-width: 180px; padding: 8px 14px; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; font-size: 14px; background: #fff; outline: none; }
   .topic-input:focus { border-color: #999; }
   .topic-input:disabled { opacity: 0.5; }
@@ -41,7 +37,7 @@
   .upload-btn:disabled { opacity: 0.5; cursor: default; }
 
   /* --- Canvas area --- */
-  .canvas-area { flex: 1; display: flex; align-items: center; justify-content: center; padding: 12px 20px; position: relative; min-height: 300px; }
+  .canvas-area { flex: 1 1 auto; display: flex; align-items: flex-start; justify-content: center; padding: 12px 20px; position: relative; min-height: 0; overflow: hidden; }
   .canvas-area.empty { color: #bbb; font-size: 15px; font-style: italic; }
   .canvas-area.generating { color: #777; font-size: 15px; flex-direction: column; gap: 14px; }
   .canvas-area.generating .spinner-large { width: 36px; height: 36px; border: 4px solid #ddd; border-top-color: #5a7d6a; border-radius: 50%; animation: spin 0.8s linear infinite; }
@@ -49,7 +45,47 @@
   .status-note .spinner { width: 16px; height: 16px; border: 2px solid #ddd; border-top-color: #5a7d6a; border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
   .image-container { position: relative; max-width: 100%; max-height: 100%; }
   .image-container.clickable { cursor: crosshair; }
-  .image-container img { display: block; max-width: 100%; max-height: calc(100vh - 260px); border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+  .image-container img { display: block; max-width: 100%; max-height: 100%; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+  .source-layout { width: min(1600px, 100%); height: 100%; display: grid; grid-template-columns: minmax(280px, 0.85fr) minmax(520px, 1.55fr) minmax(300px, 0.9fr); gap: 16px; align-items: stretch; overflow: hidden; }
+  .source-layout .image-container { display: flex; align-items: flex-start; justify-content: center; min-width: 0; min-height: 0; }
+  .source-layout .image-container img { max-height: 100%; width: auto; }
+  .source-side { display: grid; gap: 12px; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+  .source-left { align-content: start; grid-auto-rows: max-content; overflow: auto; padding-right: 2px; }
+  .source-center { display: flex; align-items: flex-start; justify-content: center; min-width: 0; min-height: 0; overflow: hidden; }
+  .source-right { grid-template-rows: minmax(0, 1fr); }
+  .source-panel { background: #fff; border: 1px solid #e8e4df; border-radius: 8px; box-shadow: 0 1px 8px rgba(0,0,0,0.04); padding: 12px 14px; min-height: 0; overflow: auto; }
+  .source-panel.tall { height: 100%; }
+  .source-panel.split { max-height: none; }
+  .source-left .source-panel, .source-right .source-panel { min-height: 0; max-height: none; }
+  .source-panel h2 { font-size: 14px; color: #4f463b; margin: 0 0 8px; border-bottom: 1px solid #ece6de; padding-bottom: 5px; }
+  .source-panel .source-content { font-size: 13px; line-height: 1.55; color: #48433d; }
+  .source-panel .source-content h1 { font-size: 16px; margin: 0 0 8px; }
+  .source-panel .source-content h2 { font-size: 13px; margin: 12px 0 6px; border: 0; padding: 0; }
+  .source-panel .source-content ul, .source-panel .source-content ol { margin: 0 0 8px 18px; }
+  .source-panel .source-content li { margin-bottom: 4px; }
+  .source-panel.drill-result { border-color: #ead0cc; }
+  .source-panel.drill-result .drill-result-meta { font-size: 11px; color: #8b6f6a; margin: -2px 0 8px; }
+  .source-panel.drill-result img { display: block; width: 100%; border-radius: 4px; border: 1px solid #eadfdc; }
+  .source-panel.drill-result svg { width: 100%; height: auto; }
+  .inline-analysis-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .inline-analysis-actions button { padding: 5px 9px; border: 1px solid #d6cfc7; border-radius: 5px; background: #f8f5f0; color: #5e5144; font-family: inherit; font-size: 11px; cursor: pointer; }
+  .source-accordions { display: grid; gap: 8px; align-content: start; }
+  .source-accordion { background: #fff; border: 1px solid #e8e4df; border-radius: 7px; box-shadow: 0 1px 6px rgba(0,0,0,0.035); overflow: hidden; }
+  .source-accordion summary { cursor: pointer; padding: 8px 11px; font-size: 13px; font-weight: 700; color: #4f463b; list-style-position: inside; }
+  .source-accordion[open] summary { border-bottom: 1px solid #ece6de; }
+  .source-accordion-content { max-height: 260px; overflow: auto; padding: 10px 12px; font-size: 13px; line-height: 1.55; color: #48433d; }
+  .empty-drill { color: #8a7d70; font-size: 13px; line-height: 1.55; }
+  @media (max-width: 1050px) {
+    body { overflow: auto; height: auto; }
+    .canvas-area { overflow: visible; }
+    .source-layout { height: auto; overflow: visible; grid-template-columns: 1fr; }
+    .source-side, .source-left, .source-right { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: none; height: auto; overflow: visible; }
+    .source-center { overflow: visible; }
+    .source-panel.tall, .source-panel.split { max-height: 260px; }
+  }
+  @media (max-width: 700px) {
+    .source-side, .source-left, .source-right { display: grid; grid-template-columns: 1fr; }
+  }
   .loading-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(250,248,245,0.85); border-radius: 4px; font-size: 14px; color: #777; }
   .loading-overlay .spinner { width: 22px; height: 22px; border: 3px solid #ddd; border-top-color: #5a7d6a; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -58,14 +94,17 @@
   .click-marker { position: absolute; pointer-events: none; transform: translate(-50%, -50%); z-index: 5; }
   .click-marker .ring { width: 48px; height: 48px; border-radius: 50%; border: 3px solid rgba(220,50,50,0.8); background: rgba(220,50,50,0.12); animation: marker-pulse 1.5s ease-in-out infinite; }
   .click-marker .dot { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; border-radius: 50%; background: rgba(220,50,50,0.85); transform: translate(-50%, -50%); }
+  .drill-target { position: absolute; width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(190,35,35,0.95); background: rgba(220,50,50,0.14); transform: translate(-50%, -50%); z-index: 4; cursor: pointer; box-shadow: 0 1px 7px rgba(80,0,0,0.24); }
+  .drill-target:hover, .drill-target.active { background: rgba(220,50,50,0.26); border-color: rgba(150,20,20,1); }
+  .drill-target-count { position: absolute; right: -8px; bottom: -8px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: #fff; border: 1px solid rgba(190,35,35,0.85); color: #9c2525; font-size: 11px; line-height: 16px; text-align: center; font-weight: 700; }
   @keyframes marker-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.15); opacity: 0.7; } }
 
   /* Confirm bar */
-  .confirm-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: minmax(220px, 1fr) 130px auto auto auto auto auto auto; gap: 8px; z-index: 6; background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; width: min(1190px, calc(100vw - 48px)); }
-  .confirm-intent { min-width: 0; padding: 6px 10px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 13px; outline: none; }
+  .confirm-bar { position: absolute; bottom: 12px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; z-index: 6; background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.15); border: 1px solid #e0dcd7; max-width: calc(100% - 24px); }
+  .confirm-intent { flex: 1 1 280px; min-width: min(220px, 100%); padding: 6px 10px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 13px; outline: none; }
   .confirm-intent:focus { border-color: #999; }
-  .confirm-select { min-width: 0; padding: 6px 9px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 12px; background: #fff; color: #555; }
-  .confirm-bar .btn { font-size: 13px; padding: 6px 18px; }
+  .confirm-select { flex: 0 1 140px; min-width: 115px; padding: 6px 9px; border: 1px solid #d5d0ca; border-radius: 6px; font-family: inherit; font-size: 12px; background: #fff; color: #555; }
+  .confirm-bar .btn { flex: 0 0 auto; min-width: 68px; font-size: 13px; padding: 6px 12px; white-space: nowrap; }
   .confirm-bar .btn.confirm-go { background: #5a7d6a; color: #fff; border-color: #5a7d6a; }
   .confirm-bar .btn.confirm-go:hover { background: #4a6a58; }
   .confirm-bar .btn.confirm-text { background: #6b5a3e; color: #fff; border-color: #6b5a3e; }
@@ -73,8 +112,8 @@
   .confirm-bar .btn.confirm-chart { background: #496a7a; color: #fff; border-color: #496a7a; }
   .confirm-bar .btn.confirm-chart:hover { background: #385665; }
   @media (max-width: 720px) {
-    .confirm-bar { grid-template-columns: 1fr 1fr; }
-    .confirm-intent, .confirm-select { grid-column: 1 / -1; }
+    .confirm-bar { left: 8px; right: 8px; bottom: 8px; max-width: calc(100% - 16px); }
+    .confirm-intent, .confirm-select { flex: 1 1 100%; }
   }
 
   /* --- Error banner --- */
@@ -82,14 +121,14 @@
   .error-banner.visible { display: block; }
 
   /* --- Thumbnail strip --- */
-  .thumbnail-strip { display: flex; gap: 6px; padding: 10px 20px; background: #fff; border-top: 1px solid #e8e4df; overflow-x: auto; flex-shrink: 0; min-height: 70px; align-items: center; }
+  .thumbnail-strip { display: flex; gap: 6px; padding: 7px 20px; background: #fff; border-top: 1px solid #e8e4df; overflow-x: auto; flex-shrink: 0; min-height: 58px; align-items: center; }
   .thumbnail-strip.hidden { display: none; }
-  .thumb { width: 88px; height: 50px; border-radius: 4px; object-fit: cover; border: 2px solid transparent; cursor: pointer; flex-shrink: 0; opacity: 0.6; transition: all 0.15s; }
+  .thumb { width: 74px; height: 42px; border-radius: 4px; object-fit: cover; border: 2px solid transparent; cursor: pointer; flex-shrink: 0; opacity: 0.6; transition: all 0.15s; }
   .thumb:hover { opacity: 0.9; }
   .thumb.active { border-color: #5a7d6a; opacity: 1; box-shadow: 0 0 0 1px #5a7d6a; }
   .thumb-index { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
   .thumb-index span { font-size: 10px; color: #999; }
-  .text-thumb { width: 88px; height: 50px; border-radius: 4px; border: 2px solid transparent; cursor: pointer; flex-shrink: 0; opacity: 0.65; transition: all 0.15s; background: #fff; color: #6b5a3e; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: inset 0 0 0 1px #e8e4df; }
+  .text-thumb { width: 74px; height: 42px; border-radius: 4px; border: 2px solid transparent; cursor: pointer; flex-shrink: 0; opacity: 0.65; transition: all 0.15s; background: #fff; color: #6b5a3e; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: inset 0 0 0 1px #e8e4df; }
   .text-thumb:hover { opacity: 0.9; }
   .text-thumb.active { border-color: #5a7d6a; opacity: 1; box-shadow: 0 0 0 1px #5a7d6a; }
 
@@ -116,7 +155,13 @@
   .renderer-language { width: 110px; padding: 4px 7px; border: 1px solid #d5d0ca; border-radius: 5px; font-family: inherit; font-size: 11px; }
   .chart-page { width: min(900px, 100%); max-height: calc(100vh - 260px); overflow-y: auto; background: #fff; border: 1px solid #e8e4df; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); padding: 24px 28px; }
   .chart-page svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart-reliability { margin: 12px 0 14px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: #5f5548; }
+  .chart-pill { border: 1px solid #d9d1c6; background: #f7f3ee; border-radius: 999px; padding: 4px 9px; }
+  .chart-pill.warn { border-color: #efd09a; background: #fff7e8; color: #7a5a19; }
+  .chart-pill.bad { border-color: #ecc1bd; background: #fff0ef; color: #94352d; }
+  .chart-fallback { margin: 12px 0; font-size: 13px; line-height: 1.5; color: #6f4e12; background: #fff8e8; border: 1px solid #f0dfb8; border-radius: 6px; padding: 10px 12px; }
   .chart-notes { margin: 14px 0 0 18px; font-size: 13px; line-height: 1.5; color: #555; }
+  .chart-evidence { margin: 14px 0 0 18px; font-size: 12px; line-height: 1.5; color: #555; }
   .chart-uncertainty { margin-top: 12px; font-size: 12px; color: #8a6d3b; background: #fff8e8; border: 1px solid #f0dfb8; border-radius: 6px; padding: 8px 10px; }
   .table-wrap { width: 100%; overflow-x: auto; margin-top: 10px; }
   .drill-table { width: 100%; border-collapse: collapse; font-size: 14px; color: #444; }
@@ -226,7 +271,6 @@
     <button class="btn" id="backBtn" disabled>Back</button>
     <button class="btn drill-btn" id="drillBtn" disabled>Drill In</button>
     <button class="btn" id="resetBtn" disabled>Reset</button>
-    <button class="btn" id="contextBtn" disabled>Context</button>
     <button class="btn" id="learnBtn" disabled>Learn</button>
     <button class="btn" id="galleryBtn">Gallery</button>
     <input class="global-language" id="globalLanguageInput" type="text" placeholder="Language">
@@ -236,11 +280,7 @@
 
 <div class="topic-area">
   <form class="topic-form" id="topicForm">
-    <div class="mode-selector" id="modeSelector">
-      <button type="button" class="mode-btn active" data-mode="illustration">Illustration</button>
-      <button type="button" class="mode-btn" data-mode="historical_map">Historical Map</button>
-    </div>
-    <input class="topic-input" id="topicInput" type="text" placeholder="Type a topic... e.g. 'how volcanoes work'" maxlength="300" autofocus>
+    <input class="topic-input" id="topicInput" type="text" placeholder="Ask for any explainer, equation, science process, historical map, or diagram..." maxlength="300" autofocus>
     <button class="generate-btn" id="generateBtn" type="submit">Generate</button>
     <button type="button" class="upload-btn" id="uploadBtn">Upload Image</button>
     <input type="file" id="fileInput" accept="image/*">
@@ -261,16 +301,6 @@
 <div class="slide-panel" id="galleryPanel">
   <div class="panel-header"><h2>Generated Images</h2><button class="panel-close" id="galleryClose">&times;</button></div>
   <div class="panel-body" id="galleryBody">Loading...</div>
-</div>
-
-<!-- Context panel -->
-<div class="panel-overlay" id="contextOverlay"></div>
-<div class="learn-panel" id="contextPanel">
-  <div class="learn-header">
-    <h2>Source Context</h2>
-    <button class="panel-close" id="contextClose">&times;</button>
-  </div>
-  <div class="learn-body" id="contextBody"></div>
 </div>
 
 <!-- Learn panel -->
@@ -302,15 +332,19 @@ const state = {
   currentIndex: -1,
   loading: false,
   drillMode: false,
-  mode: 'illustration',
+  mode: 'auto',
   modes: [],
   responseDepth: 'explain',
   language: '',
   pendingClick: null, // { x, y } — awaiting confirmation
+  activeDrillByParent: {}, // parent page id -> { key, index }
 };
 
 const $ = id => document.getElementById(id);
 const SESSION_KEY = 'illustratedExplainer.session.v1';
+const sourceContextCache = {}; // pageId -> source context page or null
+const sourceContextRequests = {}; // pageId -> Promise
+const inlineAnalysisRequests = {}; // pageId -> Promise
 
 function escapeHtml(text) {
   return String(text)
@@ -321,11 +355,20 @@ function escapeHtml(text) {
 }
 
 function renderMath(root = document.body) {
-  if (!window.MathJax?.typesetPromise) return;
-  window.MathJax.typesetClear?.([root]);
-  window.MathJax.typesetPromise([root]).catch(err => {
-    console.warn('MathJax render failed:', err);
-  });
+  const run = () => {
+    if (!window.MathJax?.typesetPromise || !root?.isConnected) return;
+    window.MathJax.typesetClear?.([root]);
+    window.MathJax.typesetPromise([root]).catch(err => {
+      console.warn('MathJax render failed:', err);
+    });
+  };
+  if (window.MathJax?.startup?.promise) {
+    window.MathJax.startup.promise.then(run).catch(() => {});
+  } else if (window.MathJax?.typesetPromise) {
+    run();
+  } else {
+    setTimeout(() => renderMath(root), 250);
+  }
 }
 
 function normalizeMathText(text) {
@@ -375,11 +418,15 @@ function chartSvg(chart) {
       const y = yScale(Number(p.y));
       const base = yScale(0);
       const x = m.left + i * band + band * 0.18;
-      return `<rect x="${x}" y="${Math.min(y, base)}" width="${band * 0.64}" height="${Math.abs(base - y)}" fill="#5a7d6a"/><title>${escapeHtml(p.label)}: ${escapeHtml(p.y)}</title>`;
+      const title = `${p.label}: ${p.y}${p.confidence != null ? ` (${Math.round(Number(p.confidence) * 100)}% confidence)` : ''}${p.evidence ? ` - ${p.evidence}` : ''}`;
+      return `<rect x="${x}" y="${Math.min(y, base)}" width="${band * 0.64}" height="${Math.abs(base - y)}" fill="#5a7d6a"/><title>${escapeHtml(title)}</title>`;
     }).join('');
   } else {
     const path = safePoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xScale(xs[i], i)} ${yScale(Number(p.y))}`).join(' ');
-    marks = `<path d="${path}" fill="none" stroke="#496a7a" stroke-width="3"/>` + safePoints.map((p, i) => `<circle cx="${xScale(xs[i], i)}" cy="${yScale(Number(p.y))}" r="${spec.type === 'scatter' ? 5 : 4}" fill="#5a7d6a"><title>${escapeHtml(p.label)}: ${escapeHtml(p.y)}</title></circle>`).join('');
+    marks = `<path d="${path}" fill="none" stroke="#496a7a" stroke-width="3"/>` + safePoints.map((p, i) => {
+      const title = `${p.label}: ${p.y}${p.confidence != null ? ` (${Math.round(Number(p.confidence) * 100)}% confidence)` : ''}${p.evidence ? ` - ${p.evidence}` : ''}`;
+      return `<circle cx="${xScale(xs[i], i)}" cy="${yScale(Number(p.y))}" r="${spec.type === 'scatter' ? 5 : 4}" fill="#5a7d6a"><title>${escapeHtml(title)}</title></circle>`;
+    }).join('');
   }
 
   return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${escapeHtml(spec.title || 'Chart')}">
@@ -478,29 +525,16 @@ function diagramSvg(diagram) {
 // --- Core functions ---
 
 function currentModeConfig() {
-  return state.modes.find(m => m.id === state.mode) || state.modes[0] || {
-    id: 'illustration',
-    label: 'Illustration',
-    tagLabel: 'illustration',
-    placeholder: "Type a topic... e.g. 'how volcanoes work'",
+  return state.modes.find(m => m.id === state.mode) || {
+    id: 'auto',
+    label: 'Smart',
+    tagLabel: 'smart',
+    placeholder: "Ask for any explainer, equation, science process, historical map, or diagram...",
   };
 }
 
 function renderModeSelector() {
-  const selector = $('modeSelector');
-  if (!selector || state.modes.length === 0) return;
-  selector.innerHTML = '';
-  for (const mode of state.modes) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = `mode-btn${mode.id === state.mode ? ' active' : ''}`;
-    btn.dataset.mode = mode.id;
-    btn.textContent = mode.label;
-    btn.title = mode.description || mode.label;
-    btn.disabled = state.loading;
-    selector.appendChild(btn);
-  }
-  $('topicInput').placeholder = currentModeConfig().placeholder;
+  if ($('topicInput')) $('topicInput').placeholder = currentModeConfig().placeholder;
 }
 
 async function loadModes() {
@@ -509,11 +543,11 @@ async function loadModes() {
     if (!res.ok) throw new Error(`Error ${res.status}`);
     const data = await res.json();
     state.modes = data.modes || [];
-    state.mode = state.modes.some(m => m.id === state.mode) ? state.mode : data.defaultMode;
+    state.mode = 'auto';
     renderModeSelector();
   } catch (err) {
     console.warn('Failed to load modes:', err);
-    state.modes = [currentModeConfig()];
+    state.modes = [];
     renderModeSelector();
   }
 }
@@ -523,7 +557,6 @@ function setLoading(loading) {
   $('topicInput').disabled = loading;
   $('generateBtn').disabled = loading;
   $('uploadBtn').disabled = loading;
-  document.querySelectorAll('.mode-btn').forEach(b => b.disabled = loading);
   renderCurrentPage();
   updateUI();
 }
@@ -579,6 +612,7 @@ function saveSession() {
       mode: state.mode,
       responseDepth: state.responseDepth,
       language: state.language,
+      activeDrillByParent: state.activeDrillByParent,
       savedAt: new Date().toISOString(),
     }));
   } catch (err) {
@@ -613,9 +647,12 @@ async function restoreSession() {
     if (pages.length) {
       state.pages = pages;
       state.currentIndex = clamp(Number(saved.currentIndex) || 0, 0, pages.length - 1);
-      if (saved.mode && state.modes.some(m => m.id === saved.mode)) state.mode = saved.mode;
+      state.mode = 'auto';
       if (['extract', 'explain', 'teach'].includes(saved.responseDepth)) state.responseDepth = saved.responseDepth;
       if (typeof saved.language === 'string') state.language = saved.language.slice(0, 80);
+      if (saved.activeDrillByParent && typeof saved.activeDrillByParent === 'object') {
+        state.activeDrillByParent = saved.activeDrillByParent;
+      }
       state.pendingClick = null;
       state.drillMode = false;
       renderModeSelector();
@@ -637,7 +674,6 @@ function updateUI() {
   if ($('globalLanguageInput') && $('globalLanguageInput').value !== state.language) $('globalLanguageInput').value = state.language;
   $('backBtn').disabled = currentIndex <= 0 || loading;
   $('resetBtn').disabled = !hasPages || loading;
-  $('contextBtn').disabled = !hasPages || loading;
   $('drillBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
   $('learnBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
   $('drillBtn').classList.toggle('active', state.drillMode);
@@ -672,6 +708,216 @@ function updateUI() {
   } else {
     $('thumbnailStrip').classList.add('hidden');
   }
+}
+
+function stripSourceContextNoise(text) {
+  return String(text || '').replace(/## Suggested Drill Targets[\s\S]*$/i, '').trim();
+}
+
+function sourceSection(text, names) {
+  const body = stripSourceContextNoise(text);
+  const wanted = names.map(name => name.toLowerCase());
+  const matches = [...body.matchAll(/^##\s+(.+?)\s*$/gmi)];
+  for (let i = 0; i < matches.length; i++) {
+    const heading = matches[i][1].trim().toLowerCase();
+    if (!wanted.includes(heading)) continue;
+    const start = matches[i].index + matches[i][0].length;
+    const end = i + 1 < matches.length ? matches[i + 1].index : body.length;
+    return body.slice(start, end).trim();
+  }
+  return '';
+}
+
+function sourceContextSections(contextPage) {
+  const content = contextPage?.content || '';
+  const extracted = [
+    sourceSection(content, ['Extracted Text', 'OCR / Transcription', 'Transcription']),
+    sourceSection(content, ['Chart And Data Extraction', 'Chart and Data Extraction', 'Data Extraction']),
+  ].filter(Boolean).join('\n\n');
+  return {
+    extracted: extracted || 'No extracted text was found for this image.',
+    structure: sourceSection(content, ['Structure']) || 'No structure summary was found for this image.',
+    concepts: sourceSection(content, ['Key Concepts']) || 'No key concepts were found for this image.',
+  };
+}
+
+function sourcePanel(title, content, extraClass = '') {
+  return `<section class="source-panel ${extraClass}">
+    <h2>${escapeHtml(title)}</h2>
+    <div class="source-content">${simpleMarkdown(content)}</div>
+  </section>`;
+}
+
+function sourceAccordion(title, content) {
+  return `<details class="source-accordion">
+    <summary>${escapeHtml(title)}</summary>
+    <div class="source-accordion-content">${simpleMarkdown(content)}</div>
+  </details>`;
+}
+
+function analysisPanel(pageId, title, key, content) {
+  const type = key === 'description' ? 'description' : 'explanation';
+  const isLoading = Boolean(inlineAnalysisRequests[pageId]);
+  const body = content
+    ? simpleMarkdown(content)
+    : `<p>${isLoading ? 'Analyzing...' : `No ${title.toLowerCase()} yet.`}</p>
+       <div class="inline-analysis-actions">
+         <button type="button" data-inline-analysis="${type}">Analyze ${escapeHtml(title)}</button>
+         <button type="button" data-inline-analysis="both">Analyze Both</button>
+       </div>`;
+  return `<section class="source-panel analysis-panel">
+    <h2>${escapeHtml(title)}</h2>
+    <div class="source-content">${body}</div>
+  </section>`;
+}
+
+function analysisAccordion(pageId, title, key, content) {
+  const type = key === 'description' ? 'description' : 'explanation';
+  const isLoading = Boolean(inlineAnalysisRequests[pageId]);
+  const body = content
+    ? simpleMarkdown(content)
+    : `<p>${isLoading ? 'Analyzing...' : `No ${title.toLowerCase()} yet.`}</p>
+       <div class="inline-analysis-actions">
+         <button type="button" data-inline-analysis="${type}">Analyze ${escapeHtml(title)}</button>
+         <button type="button" data-inline-analysis="both">Analyze Both</button>
+       </div>`;
+  return `<details class="source-accordion">
+    <summary>${escapeHtml(title)}</summary>
+    <div class="source-accordion-content">${body}</div>
+  </details>`;
+}
+
+function loadInlineAnalysis(pageId) {
+  if (!pageId || learnCache[pageId] || inlineAnalysisRequests[pageId]) return;
+  inlineAnalysisRequests[pageId] = fetch(`/api/analysis/${pageId}`)
+    .then(res => res.ok ? res.json() : { description: null, explanation: null })
+    .then(data => { learnCache[pageId] = data; })
+    .catch(() => { learnCache[pageId] = { description: null, explanation: null }; })
+    .finally(() => {
+      delete inlineAnalysisRequests[pageId];
+      if (state.pages[state.currentIndex]?.id === pageId) {
+        renderCurrentPage();
+        updateUI();
+      }
+    });
+}
+
+function bindInlineAnalysisActions(root, pageId) {
+  root.querySelectorAll('[data-inline-analysis]').forEach(button => {
+    button.addEventListener('click', () => runInlineAnalysis(pageId, button.dataset.inlineAnalysis));
+  });
+}
+
+async function runInlineAnalysis(pageId, type) {
+  if (!pageId || inlineAnalysisRequests[pageId]) return;
+  inlineAnalysisRequests[pageId] = Promise.resolve();
+  renderCurrentPage();
+  updateUI();
+  try {
+    const res = await fetch(`/api/analysis/${pageId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type }),
+    });
+    const data = await res.json();
+    if (data.error && !data.description && !data.explanation) showError(data.error);
+    learnCache[pageId] = data;
+  } catch (err) {
+    showError('Analysis failed: ' + err.message);
+  } finally {
+    delete inlineAnalysisRequests[pageId];
+    renderCurrentPage();
+    updateUI();
+  }
+}
+
+function drillKey(click) {
+  return `${Number(click.x).toFixed(2)}:${Number(click.y).toFixed(2)}`;
+}
+
+function drillGroupsForPage(parentId) {
+  const groups = new Map();
+  for (const page of state.pages) {
+    if (page.parentId !== parentId || !page.parentClick) continue;
+    const key = drillKey(page.parentClick);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        x: Number(page.parentClick.x),
+        y: Number(page.parentClick.y),
+        items: [],
+      });
+    }
+    groups.get(key).items.push(page);
+  }
+  return [...groups.values()];
+}
+
+function activeDrillSelection(parentId, groups) {
+  const saved = state.activeDrillByParent[parentId];
+  if (!saved) return null;
+  const group = groups.find(item => item.key === saved.key);
+  if (!group?.items.length) return null;
+  const index = clamp(Number(saved.index) || 0, 0, group.items.length - 1);
+  return { group, index, page: group.items[index] };
+}
+
+function selectDrillGroup(parentId, groupKey) {
+  const groups = drillGroupsForPage(parentId);
+  const group = groups.find(item => item.key === groupKey);
+  if (!group) return;
+  const current = state.activeDrillByParent[parentId];
+  const nextIndex = current?.key === groupKey ? ((Number(current.index) || 0) + 1) % group.items.length : 0;
+  state.activeDrillByParent[parentId] = { key: groupKey, index: nextIndex };
+  renderCurrentPage();
+  updateUI();
+}
+
+function compactChartHtml(chart) {
+  const notes = chart?.notes?.length ? `<ul>${chart.notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>` : '';
+  const uncertainty = chart?.uncertainty ? `<p><strong>Uncertainty:</strong> ${escapeHtml(chart.uncertainty)}</p>` : '';
+  return `${chartSvg(chart || {})}${notes}${uncertainty}`;
+}
+
+function drillResultPanel(selection) {
+  if (!selection?.page) {
+    return `<section class="source-panel drill-result">
+      <h2>Drill-in Explanation</h2>
+      <div class="empty-drill">Click a red drill-in circle on the image to show its explanation here. Re-click numbered circles to cycle through related drill-ins.</div>
+    </section>`;
+  }
+  const page = selection.page;
+  const kind = ({ markdown: 'Text', chart: 'Chart', table: 'Table', diagram: 'Diagram', image: 'Image' })[page.type] || page.type;
+  const title = page.title || page.intent || `${kind} drill-in`;
+  const meta = `${kind} ${selection.index + 1} of ${selection.group.items.length}`;
+  let body = '';
+  if (page.type === 'markdown') body = simpleMarkdown(page.content || '');
+  else if (page.type === 'chart') body = compactChartHtml(page.chart || {});
+  else if (page.type === 'table') body = tableHtml(page.table || {});
+  else if (page.type === 'diagram') body = diagramSvg(page.diagram || {});
+  else if (page.type === 'image') body = `<img src="${escapeHtml(page.imageUrl)}" alt="${escapeHtml(title)}">`;
+  else body = '<p>No renderable drill-in content.</p>';
+
+  return `<section class="source-panel drill-result">
+    <h2>${escapeHtml(title)}</h2>
+    <div class="drill-result-meta">${escapeHtml(meta)}</div>
+    <div class="source-content">${body}</div>
+  </section>`;
+}
+
+function loadSourceContext(pageId) {
+  if (!pageId || sourceContextCache[pageId] !== undefined || sourceContextRequests[pageId]) return;
+  sourceContextRequests[pageId] = fetch(`/api/context/${pageId}`)
+    .then(res => res.ok ? res.json() : { page: null })
+    .then(data => { sourceContextCache[pageId] = data.page || null; })
+    .catch(() => { sourceContextCache[pageId] = null; })
+    .finally(() => {
+      delete sourceContextRequests[pageId];
+      if (state.pages[state.currentIndex]?.id === pageId) {
+        renderCurrentPage();
+        updateUI();
+      }
+    });
 }
 
 function renderCurrentPage() {
@@ -709,12 +955,37 @@ function renderCurrentPage() {
   if (page.type === 'chart') {
     const article = document.createElement('article');
     article.className = 'chart-page';
+    const chart = page.chart || {};
+    const chartability = chart.chartability || 'medium';
+    const confidence = Number.isFinite(Number(chart.confidence)) ? `${Math.round(Number(chart.confidence) * 100)}% confidence` : 'confidence not rated';
+    const reliabilityClass = chartability === 'low' ? 'bad' : (chart.requiresUserConfirmation || chart.validationIssues?.length ? 'warn' : '');
+    const reliability = `
+      <div class="chart-reliability">
+        <span class="chart-pill ${reliabilityClass}">Chartability: ${escapeHtml(chartability)}</span>
+        <span class="chart-pill ${reliabilityClass}">${escapeHtml(confidence)}</span>
+        ${chart.requiresUserConfirmation ? '<span class="chart-pill warn">Review values before using</span>' : ''}
+      </div>
+    `;
+    const fallback = chartability === 'low'
+      ? `<div class="chart-fallback">A chart is not reliable for this selected region. Recommended fallback: ${escapeHtml(chart.fallbackRecommendation || 'text')}.</div>`
+      : '';
     const notes = page.chart?.notes?.length
       ? `<ul class="chart-notes">${page.chart.notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>`
+      : '';
+    const evidenceItems = [
+      ...(Array.isArray(chart.sourceEvidence) ? chart.sourceEvidence : []),
+      ...(Array.isArray(chart.points) ? chart.points.filter(point => point.evidence).slice(0, 8).map(point => `${point.label}: ${point.evidence}`) : []),
+    ].slice(0, 10);
+    const evidence = evidenceItems.length
+      ? `<ul class="chart-evidence">${evidenceItems.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+      : '';
+    const validation = chart.validationIssues?.length
+      ? `<div class="chart-uncertainty">Validation notes: ${escapeHtml(chart.validationIssues.join(' '))}</div>`
       : '';
     const uncertainty = page.chart?.uncertainty
       ? `<div class="chart-uncertainty">${escapeHtml(page.chart.uncertainty)}</div>`
       : '';
+    const shouldRenderChart = chartability !== 'low' && Array.isArray(chart.points) && chart.points.length >= 2;
     article.innerHTML = `
       <div class="text-page-header">
         <div class="text-page-title">${escapeHtml(page.title || page.chart?.title || 'Chart drill-down')}</div>
@@ -723,9 +994,13 @@ function renderCurrentPage() {
           ${rendererActions(page)}
         </div>
       </div>
-      ${chartSvg(page.chart || {})}
+      ${reliability}
+      ${fallback}
+      ${shouldRenderChart ? chartSvg(chart) : ''}
       ${notes}
+      ${evidence}
       ${uncertainty}
+      ${validation}
       ${page.source ? `<div class="text-page-source">Generated via ${escapeHtml(page.source)}</div>` : ''}
     `;
     canvas.appendChild(article);
@@ -791,6 +1066,10 @@ function renderCurrentPage() {
 
   const container = document.createElement('div');
   container.className = `image-container${state.drillMode ? ' clickable' : ''}`;
+  loadSourceContext(page.id);
+  loadInlineAnalysis(page.id);
+  const drillGroups = drillGroupsForPage(page.id);
+  const activeDrill = activeDrillSelection(page.id, drillGroups);
 
   const img = document.createElement('img');
   img.src = page.imageUrl;
@@ -809,6 +1088,32 @@ function renderCurrentPage() {
   };
 
   container.appendChild(img);
+
+  if (drillGroups.length) {
+    // Browser-only navigation targets. Model calls use the original image file plus the selected coordinates on the server.
+    const placeTarget = (target, group) => {
+      const imgRect = img.getBoundingClientRect();
+      const contRect = container.getBoundingClientRect();
+      target.style.left = `${group.x * imgRect.width + (imgRect.left - contRect.left)}px`;
+      target.style.top = `${group.y * imgRect.height + (imgRect.top - contRect.top)}px`;
+    };
+
+    for (const group of drillGroups) {
+      const target = document.createElement('button');
+      target.type = 'button';
+      target.className = `drill-target${activeDrill?.group.key === group.key ? ' active' : ''}`;
+      target.title = group.items.length > 1 ? `Open drill-ins (${group.items.length}); click again to cycle` : 'Open drill-in';
+      target.innerHTML = group.items.length > 1 ? `<span class="drill-target-count">${group.items.length}</span>` : '';
+      target.onclick = (event) => {
+        event.stopPropagation();
+        selectDrillGroup(page.id, group.key);
+      };
+      container.appendChild(target);
+      if (img.complete) placeTarget(target, group);
+      else img.addEventListener('load', () => placeTarget(target, group), { once: true });
+      requestAnimationFrame(() => placeTarget(target, group));
+    }
+  }
 
   // Show the click marker if pending
   if (state.pendingClick && !state.loading) {
@@ -918,7 +1223,40 @@ function renderCurrentPage() {
     container.appendChild(overlay);
   }
 
-  canvas.appendChild(container);
+  const sourceContext = sourceContextCache[page.id];
+  if (sourceContext?.content) {
+    const sections = sourceContextSections(sourceContext);
+    const analysis = learnCache[page.id] || {};
+    const layout = document.createElement('div');
+    layout.className = 'source-layout';
+
+    const left = document.createElement('div');
+    left.className = 'source-side source-left source-accordions';
+    left.innerHTML = [
+      sourceAccordion('Extracted Text', sections.extracted),
+      sourceAccordion('Structure', sections.structure),
+      sourceAccordion('Key Concepts', sections.concepts),
+      analysisAccordion(page.id, 'Description', 'description', analysis.description),
+      analysisAccordion(page.id, 'Concepts', 'explanation', analysis.explanation),
+    ].join('');
+
+    const center = document.createElement('div');
+    center.className = 'source-center';
+    center.appendChild(container);
+
+    const right = document.createElement('div');
+    right.className = 'source-side source-right';
+    right.innerHTML = drillResultPanel(activeDrill);
+
+    layout.appendChild(left);
+    layout.appendChild(center);
+    layout.appendChild(right);
+    canvas.appendChild(layout);
+    bindInlineAnalysisActions(left, page.id);
+    renderMath(layout);
+  } else {
+    canvas.appendChild(container);
+  }
 }
 
 // --- Generation ---
@@ -927,8 +1265,7 @@ async function generateFirstPage(query) {
   clearError();
   setLoading(true);
   $('canvasArea').className = 'canvas-area generating';
-  const label = currentModeConfig().tagLabel || currentModeConfig().label.toLowerCase();
-  $('canvasArea').innerHTML = `<div class="spinner-large"></div>Generating ${label}... this takes 30–60 seconds`;
+  $('canvasArea').innerHTML = `<div class="spinner-large"></div>Choosing the right explainer format... this takes 30–60 seconds`;
 
   try {
     const res = await fetch('/api/page', {
@@ -939,6 +1276,7 @@ async function generateFirstPage(query) {
     const { page } = await res.json();
     state.pages = [page];
     state.currentIndex = 0;
+    state.activeDrillByParent = {};
     saveSession();
     clearError();
   } catch (err) { showError(err.message); }
@@ -956,6 +1294,11 @@ async function generateChildPage(parentId, x, y, responseKind = 'image', intent 
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
     const { page } = await res.json();
     state.pages.push(page);
+    if (page.parentId && page.parentClick) {
+      const key = drillKey(page.parentClick);
+      const existingCount = state.pages.filter(item => item.parentId === page.parentId && item.parentClick && drillKey(item.parentClick) === key).length;
+      state.activeDrillByParent[page.parentId] = { key, index: Math.max(0, existingCount - 1) };
+    }
     state.currentIndex = state.pages.length - 1;
     saveSession();
     clearError();
@@ -1049,13 +1392,10 @@ async function generateUploadContext(pageId) {
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
     const { page } = await res.json();
-    if (page && !state.pages.some(p => p.id === page.id)) {
-      state.pages.push(page);
-      state.currentIndex = state.pages.length - 1;
-      saveSession();
-      renderCurrentPage();
-      updateUI();
-    }
+    sourceContextCache[pageId] = page || null;
+    renderCurrentPage();
+    updateUI();
+    saveSession();
   } catch (err) {
     showError(err.message);
   } finally {
@@ -1088,6 +1428,7 @@ async function uploadImage(file) {
     const { page } = await res.json();
     state.pages = [page];
     state.currentIndex = 0;
+    state.activeDrillByParent = {};
     saveSession();
     renderCurrentPage();
     updateUI();
@@ -1253,31 +1594,6 @@ function simpleMarkdown(text) {
     .replace(/\n/g, '<br>');
 }
 
-function contextMarkdown(text) {
-  return String(text || '').replace(/## Suggested Drill Targets[\s\S]*$/i, '').trim();
-}
-
-async function openContext() {
-  const page = state.pages[state.currentIndex];
-  if (!page) return;
-  $('contextOverlay').classList.add('visible');
-  $('contextPanel').classList.add('visible');
-  $('contextBody').innerHTML = `<div class="loading-msg"><span class="spinner"></span>Loading source context...</div>`;
-  try {
-    const res = await fetch(`/api/context/${page.id}`);
-    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
-    const data = await res.json();
-    if (!data.page?.content) {
-      $('contextBody').innerHTML = '<div class="empty-msg">No source context has been generated for this item.</div>';
-      return;
-    }
-    $('contextBody').innerHTML = `<div class="learn-content">${simpleMarkdown(contextMarkdown(data.page.content))}</div>`;
-    renderMath($('contextBody'));
-  } catch (err) {
-    $('contextBody').innerHTML = `<p style="color:#b91c1c">Error: ${escapeHtml(err.message)}</p>`;
-  }
-}
-
 async function openLearn() {
   const page = state.pages[state.currentIndex];
   if (!page) return;
@@ -1369,18 +1685,6 @@ $('topicForm').addEventListener('submit', (e) => {
   generateFirstPage(query);
 });
 
-$('modeSelector').addEventListener('click', (e) => {
-  const btn = e.target.closest('.mode-btn');
-  if (!btn || state.loading) return;
-  const newMode = btn.dataset.mode;
-  if (newMode === state.mode) return;
-  state.mode = newMode;
-  document.querySelectorAll('.mode-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.mode === newMode);
-  });
-  $('topicInput').placeholder = currentModeConfig().placeholder;
-});
-
 $('drillBtn').addEventListener('click', () => {
   if (!state.loading && state.pages.length > 0) {
     state.drillMode = !state.drillMode;
@@ -1402,7 +1706,7 @@ $('backBtn').addEventListener('click', () => {
 
 $('resetBtn').addEventListener('click', () => {
   if (!state.loading) {
-    state.pages = []; state.currentIndex = -1; state.pendingClick = null; state.drillMode = false;
+    state.pages = []; state.currentIndex = -1; state.pendingClick = null; state.drillMode = false; state.activeDrillByParent = {};
     localStorage.removeItem(SESSION_KEY);
     $('topicInput').value = '';
     $('topicInput').focus();
@@ -1426,10 +1730,6 @@ $('learnTabs').addEventListener('click', (e) => {
   learnActiveTab = tab.dataset.tab;
   renderLearnTab();
 });
-
-$('contextBtn').addEventListener('click', openContext);
-$('contextClose').addEventListener('click', () => closePanel('context'));
-$('contextOverlay').addEventListener('click', () => closePanel('context'));
 
 $('galleryBtn').addEventListener('click', openGallery);
 $('galleryClose').addEventListener('click', () => closePanel('gallery'));
