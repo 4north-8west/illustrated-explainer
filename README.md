@@ -260,6 +260,14 @@ PORT=3001 npm start
 - Chart/table/diagram quality depends heavily on the selected vision/chat model.
 - Branching history is not yet implemented; the current UI uses a linear session strip.
 
+## Attribution
+
+This project was directly inspired by vthinkxie's [illustrated-explainer-spec](https://github.com/vthinkxie/illustrated-explainer-spec/tree/main), a stack-agnostic specification for an infinite drill-down illustrated explainer: type a topic, click anywhere on the image, and generate the next page while preserving the visual style. The original spec defines the core interaction loop, deterministic caching idea, and red-marker technique for showing an image model where the reader pointed.
+
+This implementation extends that starting point with uploaded images, multiple content modes, text/chart/table/diagram renderers, response-depth controls, translation, gallery/session restore, and local-first model controls.
+
+The broader interaction direction also sits in the tradition of explorable explanations and active reading, especially Bret Victor's 2011 essay [Explorable Explanations](https://worrydream.com/ExplorableExplanations/). The click-targeted drill-in mechanism in this app should be understood as an implementation experiment in that lineage, not as an original invention of the underlying active-reading concept.
+
 ## Roadmap Ideas
 
 - Add local image generation/editing providers.
