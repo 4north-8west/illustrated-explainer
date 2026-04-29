@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import dotenv from 'dotenv';
 dotenv.config({ override: true });
 import express from 'express';
@@ -1206,6 +1206,162 @@ app.post('/api/upload', async (req, res) => {
   }
 });
 
+// --- PDF upload (Phase 1 MVP — tag detection + render-as-images) ---
+// Detects whether the PDF is tagged. Renders every page to PNG via poppler's
+// pdftoppm and registers each as a regular image-type page so the existing
+// drill-in / analysis / entities pipelines work unchanged. Tagged-tree text
+// extraction (Phase 2) is a follow-up — for now we record `pdfTagged` in
+// metadata so the future flow can route from it.
+function detectPdfMetadata(pdfPath) {
+  let stdout = '';
+  try {
+    stdout = execFileSync('pdfinfo', [pdfPath], { encoding: 'utf8', timeout: 15000 });
+  } catch (err) {
+    throw new Error(`pdfinfo failed: ${err.message} (is poppler installed? brew install poppler)`);
+  }
+  const lines = stdout.split('\n');
+  let pages = 0;
+  let tagged = false;
+  let title = '';
+  for (const line of lines) {
+    const m = line.match(/^([^:]+):\s*(.+)$/);
+    if (!m) continue;
+    const key = m[1].trim().toLowerCase();
+    const val = m[2].trim();
+    if (key === 'pages') pages = parseInt(val, 10) || 0;
+    else if (key === 'tagged') tagged = /yes/i.test(val);
+    else if (key === 'title') title = val;
+  }
+  return { pages, tagged, title };
+}
+
+function renderPdfPage(pdfPath, pageNumber, outPrefix, dpi = 150) {
+  const args = [
+    '-r', String(dpi),
+    '-f', String(pageNumber),
+    '-l', String(pageNumber),
+    '-png',
+    '-singlefile',
+    pdfPath,
+    outPrefix,
+  ];
+  try {
+    execFileSync('pdftoppm', args, { timeout: 60000, stdio: ['ignore', 'ignore', 'pipe'] });
+  } catch (err) {
+    throw new Error(`pdftoppm failed on page ${pageNumber}: ${err.message}`);
+  }
+  const outPath = outPrefix + '.png';
+  if (!fs.existsSync(outPath)) {
+    throw new Error(`pdftoppm produced no output for page ${pageNumber}`);
+  }
+  return outPath;
+}
+
+app.post('/api/upload-pdf', async (req, res) => {
+  const { pdfData, label, mode: reqMode, dpi: reqDpi } = req.body;
+  if (!pdfData || !label) {
+    return res.status(400).json({ error: 'pdfData (base64) and label are required' });
+  }
+  const trimmedLabel = String(label).trim();
+  if (trimmedLabel.length < 1 || trimmedLabel.length > 300) {
+    return res.status(400).json({ error: 'Label must be 1–300 characters' });
+  }
+  const mode = (reqMode && VALID_MODES.includes(reqMode)) ? reqMode : 'illustration';
+  const dpi = Math.max(72, Math.min(300, Number(reqDpi) || 150));
+
+  // Decode base64 (strip data URI prefix if present)
+  const base64Clean = String(pdfData).replace(/^data:application\/pdf;base64,/, '').replace(/^data:[^;]+;base64,/, '');
+  let pdfBuffer;
+  try {
+    pdfBuffer = Buffer.from(base64Clean, 'base64');
+  } catch (err) {
+    return res.status(400).json({ error: 'pdfData is not valid base64' });
+  }
+  if (pdfBuffer.length < 100 || pdfBuffer.slice(0, 5).toString() !== '%PDF-') {
+    return res.status(400).json({ error: 'Uploaded file is not a valid PDF' });
+  }
+
+  const folder = `upload-pdf-${slugify(trimmedLabel)}`;
+  const folderPath = path.join(GENERATED_DIR, folder);
+  fs.mkdirSync(folderPath, { recursive: true });
+
+  const pdfHashHex = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
+  const pdfDocId = pdfHashHex.slice(0, 16);
+  const pdfPath = path.join(folderPath, `${pdfDocId}.pdf`);
+  fs.writeFileSync(pdfPath, pdfBuffer);
+
+  let info;
+  try {
+    info = detectPdfMetadata(pdfPath);
+  } catch (err) {
+    console.error('[upload-pdf] pdfinfo error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+  if (info.pages < 1) {
+    return res.status(400).json({ error: 'PDF has no pages' });
+  }
+
+  console.log(`[upload-pdf] ${trimmedLabel}: ${info.pages} pages, tagged=${info.tagged}, dpi=${dpi}`);
+
+  const pages = [];
+  try {
+    for (let n = 1; n <= info.pages; n++) {
+      const pageId = hash(`pdfpage${CACHE_VERSION}${pdfHashHex}${n}`);
+      const pngPath = path.join(folderPath, `${pageId}.png`);
+      // Skip render if PNG already exists (cache hit on re-upload of identical PDF)
+      if (!fs.existsSync(pngPath)) {
+        const outPrefix = path.join(folderPath, pageId);
+        const produced = renderPdfPage(pdfPath, n, outPrefix, dpi);
+        if (produced !== pngPath) {
+          // pdftoppm appends .png — produced path should equal pngPath
+          if (fs.existsSync(produced) && produced !== pngPath) {
+            fs.renameSync(produced, pngPath);
+          }
+        }
+      }
+      pageMeta[pageId] = {
+        folder,
+        query: trimmedLabel,
+        mode,
+        type: 'image',
+        parentId: null,
+        pdfDocId,
+        pdfPageNumber: n,
+        pdfPageCount: info.pages,
+        pdfTagged: info.tagged,
+        pdfTitle: info.title || null,
+      };
+      pages.push({
+        id: pageId,
+        type: 'image',
+        imageUrl: `/generated/${folder}/${pageId}.png`,
+        parentId: null,
+        parentClick: null,
+        initialQuery: trimmedLabel,
+        mode,
+        pdfDocId,
+        pdfPageNumber: n,
+        pdfPageCount: info.pages,
+        pdfTagged: info.tagged,
+        pdfTitle: info.title || null,
+      });
+    }
+    saveMetadata(pageMeta);
+  } catch (err) {
+    console.error('[upload-pdf] render failed:', err.message);
+    return res.status(500).json({ error: 'PDF render failed: ' + err.message });
+  }
+
+  console.log(`[upload-pdf] done: ${pages.length} pages registered for doc ${pdfDocId}`);
+  res.json({
+    pdfDocId,
+    pdfPageCount: info.pages,
+    pdfTagged: info.tagged,
+    pdfTitle: info.title || null,
+    pages,
+  });
+});
+
 async function generateUploadContextPage(uploadPageIdValue) {
   const meta = pageMeta[uploadPageIdValue];
   if (!meta) throw new Error('Upload page metadata not found');
@@ -1449,6 +1605,12 @@ function pageFromMetadata(pageId) {
     mode: meta.mode || 'illustration',
     intent: meta.intent || '',
     contextPageId: meta.contextPageId || null,
+    // PDF fields, present only on PDF-derived pages
+    pdfDocId: meta.pdfDocId || null,
+    pdfPageNumber: meta.pdfPageNumber || null,
+    pdfPageCount: meta.pdfPageCount || null,
+    pdfTagged: typeof meta.pdfTagged === 'boolean' ? meta.pdfTagged : null,
+    pdfTitle: meta.pdfTitle || null,
   };
 }
 

@@ -334,7 +334,7 @@
     <input class="topic-input" id="topicInput" type="text" placeholder="Ask for any explainer, equation, science process, historical map, or diagram..." maxlength="300" autofocus>
     <button class="generate-btn" id="generateBtn" type="submit">Generate</button>
     <button type="button" class="upload-btn" id="uploadBtn">Upload Image</button>
-    <input type="file" id="fileInput" accept="image/*">
+    <input type="file" id="fileInput" accept="image/*,application/pdf,.pdf">
   </form>
 </div>
 
@@ -776,7 +776,13 @@ async function restoreSession() {
 function updateUI() {
   const { pages, currentIndex, loading } = state;
   const hasPages = pages.length > 0;
-  $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
+  const cur = pages[currentIndex];
+  if (hasPages && cur?.pdfDocId && cur?.pdfPageNumber && cur?.pdfPageCount) {
+    const taggedTag = cur.pdfTagged ? 'tagged' : 'untagged';
+    $('pageCounter').textContent = `PDF · page ${cur.pdfPageNumber}/${cur.pdfPageCount} (${taggedTag}) · session ${currentIndex + 1}/${pages.length}`;
+  } else {
+    $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
+  }
   if ($('globalLanguageInput') && $('globalLanguageInput').value !== state.language) $('globalLanguageInput').value = state.language;
   $('backBtn').disabled = currentIndex <= 0 || loading;
   $('resetBtn').disabled = !hasPages || loading;
@@ -1518,6 +1524,10 @@ async function generateUploadContext(pageId) {
 // --- Upload ---
 
 async function uploadImage(file) {
+  // Detect PDF and route to multi-page upload pipeline
+  const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
+  if (isPdf) return uploadPdf(file);
+
   const label = $('topicInput').value.trim() || file.name.replace(/\.\w+$/, '');
   clearError();
   setLoading(true);
@@ -1548,6 +1558,50 @@ async function uploadImage(file) {
     await generateUploadContext(page.id);
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
+}
+
+async function uploadPdf(file) {
+  const label = $('topicInput').value.trim() || file.name.replace(/\.\w+$/, '');
+  clearError();
+  setLoading(true);
+  $('canvasArea').className = 'canvas-area generating';
+  $('canvasArea').innerHTML = `<div class="spinner-large"></div>Rendering PDF pages…`;
+
+  try {
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const res = await fetch('/api/upload-pdf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdfData: base64, label, mode: state.mode }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || `Error ${res.status}`);
+    }
+    const data = await res.json();
+    if (!Array.isArray(data.pages) || !data.pages.length) {
+      throw new Error('PDF returned no pages');
+    }
+    state.pages = data.pages;
+    state.currentIndex = 0;
+    state.activeDrillByParent = {};
+    saveSession();
+    renderCurrentPage();
+    updateUI();
+    clearError();
+    const taggedTag = data.pdfTagged ? 'tagged PDF' : 'untagged / image PDF';
+    showStatus(`Loaded ${data.pages.length} page${data.pages.length === 1 ? '' : 's'} (${taggedTag}). Drill in on any page or open Entities for structured extraction.`);
+    setTimeout(clearStatus, 6000);
+  } catch (err) {
+    showError('PDF upload failed: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
 }
 
 // --- Gallery ---
