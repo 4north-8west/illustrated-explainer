@@ -246,68 +246,6 @@
   .learn-content code { font-family: monospace; background: #f0ede8; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
   .learn-timestamp { font-size: 11px; color: #bbb; text-align: right; margin-top: 16px; font-style: italic; }
 
-  /* --- Entities panel (langextract structured output) --- */
-  .entities-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 96vw); background: #faf8f5; border-left: 1px solid #e0dcd7; z-index: 52; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; box-shadow: -4px 0 24px rgba(0,0,0,0.08); }
-  .entities-panel.visible { transform: translateX(0); }
-  .entities-header { padding: 12px 16px; border-bottom: 1px solid #e8e4df; background: #fff; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  .entities-header h2 { font-size: 15px; font-weight: 600; color: #444; margin: 0; }
-  .entities-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .entities-refresh { padding: 4px 12px; font-size: 12px; }
-  .entities-view-tabs { display: flex; gap: 0; border: 1px solid #d6cfc7; border-radius: 6px; overflow: hidden; }
-  .ev-tab { padding: 4px 11px; border: none; background: #fff; font-family: inherit; font-size: 12px; cursor: pointer; color: #6e655a; border-right: 1px solid #ece6de; transition: background 0.12s, color 0.12s; }
-  .ev-tab:last-child { border-right: none; }
-  .ev-tab:hover:not(.active) { background: #f9f5f0; color: #2c2925; }
-  .ev-tab.active { background: #a23b31; color: #fff; }
-  .ev-tab:disabled { opacity: 0.4; cursor: default; }
-  /* Page-grouped + Outline views */
-  .entities-page-section { margin-bottom: 14px; padding-left: 8px; border-left: 3px solid #d6cfc7; }
-  .entities-page-section h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: #6e655a; margin: 0 0 6px; text-transform: uppercase; cursor: pointer; }
-  .entities-page-section h3:hover { color: #a23b31; }
-  .entities-page-section .page-count { color: #aaa; font-weight: 400; margin-left: 6px; }
-  .outline-list { display: flex; flex-direction: column; gap: 4px; }
-  .outline-item { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border: 1px solid #ece6de; border-radius: 6px; background: #fff; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
-  .outline-item:hover { border-color: #a23b31; background: #fff7f5; }
-  .outline-item.no-page { cursor: default; opacity: 0.7; }
-  .outline-item .page-badge { font-family: "SF Mono", ui-monospace, monospace; font-size: 11px; color: #a23b31; font-weight: 600; flex-shrink: 0; min-width: 36px; }
-  .outline-item .page-badge.unmapped { color: #b8aea0; }
-  .outline-item .outline-text { font-size: 13px; color: #2c2925; line-height: 1.35; word-break: break-word; }
-  .outline-item.lvl-1 .outline-text { font-weight: 700; font-size: 14px; }
-  .outline-item.lvl-2 .outline-text { font-weight: 600; }
-  .outline-item.lvl-3 { padding-left: 22px; }
-  .outline-item.lvl-3 .outline-text { color: #57534e; }
-  .outline-pages-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid #ece6de; }
-  .outline-pages-section h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8a8378; margin: 0 0 8px; font-family: "SF Mono", ui-monospace, monospace; }
-  .entities-status { padding: 8px 16px; font-size: 11px; color: #8a8378; background: #f5f1ec; border-bottom: 1px solid #ece6de; min-height: 16px; font-family: "SF Mono", ui-monospace, monospace; }
-  .entities-body { flex: 1; overflow-y: auto; padding: 14px 16px 22px; }
-  .entities-empty { padding: 32px 18px; color: #999; text-align: center; font-size: 13px; line-height: 1.55; }
-  .entities-empty button { margin-top: 12px; padding: 8px 18px; background: #5a7d6a; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 13px; }
-  .entities-empty button:hover { background: #4a6a58; }
-  .entities-empty button:disabled { opacity: 0.55; cursor: default; }
-  .entities-summary { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #ece6de; }
-  .entities-summary .summary-chip { font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid #d6cfc7; background: #fff; color: #5e5144; cursor: pointer; user-select: none; transition: background 0.15s, border-color 0.15s; font-family: "SF Mono", ui-monospace, monospace; }
-  .entities-summary .summary-chip:hover { border-color: #a23b31; }
-  .entities-summary .summary-chip.active { background: #a23b31; color: #fff; border-color: #a23b31; }
-  .entities-class-section { margin-bottom: 18px; }
-  .entities-class-section h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ent-color, #5e5144); margin: 0 0 8px; padding-left: 8px; border-left: 3px solid var(--ent-color, #5e5144); }
-  .entities-class-section .class-count { color: #aaa; font-weight: 400; margin-left: 6px; }
-  .entity-card { background: #fff; border: 1px solid #ece6de; border-left: 3px solid var(--ent-color, #d6cfc7); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; cursor: pointer; transition: background 0.12s, border-color 0.12s, transform 0.08s; position: relative; }
-  .entity-card:hover { background: #fff7f5; border-left-color: var(--ent-color, #a23b31); }
-  .entity-card.active { background: #fff1ed; border-color: var(--ent-color, #a23b31); border-left-width: 4px; }
-  .entity-card .entity-text { font-size: 13.5px; line-height: 1.45; color: #2c2925; word-break: break-word; }
-  .entity-card .entity-attrs { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
-  .entity-card .attr { font-size: 10.5px; padding: 1px 6px; border: 1px solid #ece6de; border-radius: 3px; color: #6e655a; background: #f9f5f0; font-family: "SF Mono", ui-monospace, monospace; }
-  .entity-card .attr .attr-key { color: #a89a86; }
-  .entity-card .entity-meta { position: absolute; right: 10px; top: 8px; font-size: 10px; color: #b8aea0; font-family: "SF Mono", ui-monospace, monospace; }
-  .entity-card .entity-page { display: inline-block; font-size: 10.5px; padding: 1px 7px; margin-right: 5px; border: 1px solid var(--ent-color, #d6cfc7); border-radius: 3px; color: var(--ent-color, #6e655a); background: #fff; font-family: "SF Mono", ui-monospace, monospace; font-weight: 600; }
-  .entity-card .entity-page::before { content: "p."; opacity: 0.6; margin-right: 2px; }
-  /* Per-class accent palette (used as left border / class header) */
-  .ent-component  { --ent-color: #2563a8; }
-  .ent-flow_step  { --ent-color: #a23b31; }
-  .ent-concept    { --ent-color: #6b5a3e; }
-  .ent-text_label { --ent-color: #496a7a; }
-  .ent-caption    { --ent-color: #5a7d6a; }
-  .ent-data_point { --ent-color: #8b5a3a; }
-  .ent-cta        { --ent-color: #ad3b85; }
 </style>
 <script>
   window.MathJax = {
@@ -335,7 +273,6 @@
     <button class="btn drill-btn" id="drillBtn" disabled>Drill In</button>
     <button class="btn" id="resetBtn" disabled>Reset</button>
     <button class="btn" id="learnBtn" disabled>Learn</button>
-    <button class="btn" id="entitiesBtn" disabled>Entities</button>
     <button class="btn" id="galleryBtn">Gallery</button>
     <input class="global-language" id="globalLanguageInput" type="text" placeholder="Language">
     <button class="btn" id="settingsBtn">Models</button>
@@ -347,7 +284,7 @@
     <input class="topic-input" id="topicInput" type="text" placeholder="Ask for any explainer, equation, science process, historical map, or diagram..." maxlength="300" autofocus>
     <button class="generate-btn" id="generateBtn" type="submit">Generate</button>
     <button type="button" class="upload-btn" id="uploadBtn">Upload Image</button>
-    <input type="file" id="fileInput" accept="image/*,application/pdf,.pdf">
+    <input type="file" id="fileInput" accept="image/*">
   </form>
 </div>
 
@@ -381,25 +318,6 @@
     </div>
   </div>
   <div class="learn-body" id="learnBody"></div>
-</div>
-
-<!-- Entities panel (langextract structured output) -->
-<div class="panel-overlay" id="entitiesOverlay"></div>
-<div class="entities-panel" id="entitiesPanel" role="dialog" aria-labelledby="entitiesPanelTitle">
-  <div class="entities-header">
-    <h2 id="entitiesPanelTitle">Structured Entities</h2>
-    <div class="entities-controls">
-      <div class="entities-view-tabs" id="entitiesViewTabs" role="tablist" aria-label="Entity view">
-        <button class="ev-tab active" data-view="class" role="tab" aria-selected="true" title="Group entities by class">Class</button>
-        <button class="ev-tab" data-view="page" role="tab" aria-selected="false" title="Group entities by source page (PDF only)">Page</button>
-        <button class="ev-tab" data-view="outline" role="tab" aria-selected="false" title="Document outline / TOC (PDF only)">Outline</button>
-      </div>
-      <button class="btn entities-refresh" id="entitiesRefreshBtn" title="Re-run langextract on the current analysis text">Refresh</button>
-      <button class="panel-close" id="entitiesClose" aria-label="Close entities panel">&times;</button>
-    </div>
-  </div>
-  <div class="entities-status mono" id="entitiesStatus"></div>
-  <div class="entities-body" id="entitiesBody"></div>
 </div>
 
 <!-- Settings panel -->
@@ -786,19 +704,12 @@ async function restoreSession() {
 function updateUI() {
   const { pages, currentIndex, loading } = state;
   const hasPages = pages.length > 0;
-  const cur = pages[currentIndex];
-  if (hasPages && cur?.pdfDocId && cur?.pdfPageNumber && cur?.pdfPageCount) {
-    const taggedTag = cur.pdfTagged ? 'tagged' : 'untagged';
-    $('pageCounter').textContent = `PDF · page ${cur.pdfPageNumber}/${cur.pdfPageCount} (${taggedTag}) · session ${currentIndex + 1}/${pages.length}`;
-  } else {
-    $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
-  }
+  $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
   if ($('globalLanguageInput') && $('globalLanguageInput').value !== state.language) $('globalLanguageInput').value = state.language;
   $('backBtn').disabled = currentIndex <= 0 || loading;
   $('resetBtn').disabled = !hasPages || loading;
   $('drillBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
   $('learnBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
-  $('entitiesBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
   $('drillBtn').classList.toggle('active', state.drillMode);
 
   if (hasPages) {
@@ -1383,7 +1294,6 @@ function renderCurrentPage() {
   } else {
     canvas.appendChild(container);
   }
-  // Re-apply entity highlights if the entities panel is open and we have entities for this page
 }
 
 // --- Generation ---
@@ -1533,10 +1443,6 @@ async function generateUploadContext(pageId) {
 // --- Upload ---
 
 async function uploadImage(file) {
-  // Detect PDF and route to multi-page upload pipeline
-  const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
-  if (isPdf) return uploadPdf(file);
-
   const label = $('topicInput').value.trim() || file.name.replace(/\.\w+$/, '');
   clearError();
   setLoading(true);
@@ -1567,50 +1473,6 @@ async function uploadImage(file) {
     await generateUploadContext(page.id);
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
-}
-
-async function uploadPdf(file) {
-  const label = $('topicInput').value.trim() || file.name.replace(/\.\w+$/, '');
-  clearError();
-  setLoading(true);
-  $('canvasArea').className = 'canvas-area generating';
-  $('canvasArea').innerHTML = `<div class="spinner-large"></div>Rendering PDF pages…`;
-
-  try {
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-    const res = await fetch('/api/upload-pdf', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pdfData: base64, label, mode: state.mode }),
-    });
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      throw new Error(d.error || `Error ${res.status}`);
-    }
-    const data = await res.json();
-    if (!Array.isArray(data.pages) || !data.pages.length) {
-      throw new Error('PDF returned no pages');
-    }
-    state.pages = data.pages;
-    state.currentIndex = 0;
-    state.activeDrillByParent = {};
-    saveSession();
-    renderCurrentPage();
-    updateUI();
-    clearError();
-    const taggedTag = data.pdfTagged ? 'tagged PDF' : 'untagged / image PDF';
-    showStatus(`Loaded ${data.pages.length} page${data.pages.length === 1 ? '' : 's'} (${taggedTag}). Drill in on any page or open Entities for structured extraction.`);
-    setTimeout(clearStatus, 6000);
-  } catch (err) {
-    showError('PDF upload failed: ' + err.message);
-  } finally {
-    setLoading(false);
-  }
 }
 
 // --- Gallery ---
@@ -1849,474 +1711,7 @@ async function runAnalysis(pageId, type) {
 function closePanel(name) {
   $(name + 'Overlay').classList.remove('visible');
   $(name + 'Panel').classList.remove('visible');
-  if (name === 'entities') {
-  }
 }
-
-// --- Entities panel (langextract) ---
-const entitiesCache = {};      // pageId → entities payload
-let entitiesLoadingId = null;
-let activeEntityIndex = -1;
-
-function entityClassLabel(cls) {
-  return ({
-    component: 'Components',
-    flow_step: 'Flow Steps',
-    concept: 'Concepts',
-    text_label: 'Text Labels',
-    caption: 'Captions',
-    data_point: 'Data Points',
-    cta: 'Calls to Action',
-  })[cls] || cls;
-}
-
-// For PDF pages we operate at document scope; the cache key is the pdfDocId.
-// For non-PDF pages we keep per-page scope; cache key is the pageId.
-function entitiesCacheKey(page) {
-  if (!page) return null;
-  return page.pdfDocId ? `doc-${page.pdfDocId}` : page.id;
-}
-
-// View mode for the entities panel: 'class' | 'page' | 'outline'.
-// 'page' and 'outline' only make sense for PDF docs; we auto-fall-back to
-// 'class' for non-PDF pages.
-let entityViewMode = 'class';
-const outlineCache = {}; // pdfDocId -> { items, pages, sourceKind }
-
-async function openEntities() {
-  const page = state.pages[state.currentIndex];
-  if (!page) return;
-  $('entitiesOverlay').classList.add('visible');
-  $('entitiesPanel').classList.add('visible');
-
-  // Pull cached analysis from the server if we haven't loaded it this session.
-  await ensureAnalysisLoaded(page.id);
-
-  const key = entitiesCacheKey(page);
-  if (!entitiesCache[key]) {
-    try {
-      const url = page.pdfDocId
-        ? `/api/entities/doc/${page.pdfDocId}`
-        : `/api/entities/${page.id}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data && data.entities) entitiesCache[key] = data.entities;
-    } catch { /* ignore */ }
-  }
-  renderEntitiesPanel();
-}
-
-async function ensureAnalysisLoaded(pageId) {
-  if (!pageId) return null;
-  if (learnCache[pageId] && (learnCache[pageId].description || learnCache[pageId].explanation)) {
-    return learnCache[pageId];
-  }
-  try {
-    const res = await fetch(`/api/analysis/${pageId}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    learnCache[pageId] = data;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-function setEntitiesStatus(text) {
-  const el = $('entitiesStatus');
-  if (el) el.textContent = text || '';
-}
-
-function renderEntitiesPanel() {
-  const page = state.pages[state.currentIndex];
-  const body = $('entitiesBody');
-  if (!page) {
-    body.innerHTML = '<div class="entities-empty">No active page.</div>';
-    setEntitiesStatus('');
-    return;
-  }
-
-  const cacheKey = entitiesCacheKey(page);
-  if (entitiesLoadingId === cacheKey) {
-    body.innerHTML = `<div class="entities-empty"><span class="spinner" style="display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#a23b31;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:8px"></span>Running langextract on the source text…</div>`;
-    setEntitiesStatus(page.pdfDocId
-      ? `Working — extracting entities for the entire PDF document (${page.pdfPageCount || '?'} pages)…`
-      : 'Working — local Gemma · this typically takes 30–90s on first run'
-    );
-    return;
-  }
-
-  const entities = entitiesCache[cacheKey];
-
-  if (!entities) {
-    const haveAnalysis = Boolean(learnCache[page.id]?.description || learnCache[page.id]?.explanation);
-    const isPdf = Boolean(page.pdfDocId);
-    let buttonLabel, helperText, statusText;
-    if (isPdf) {
-      buttonLabel = `Extract entities (whole document, ${page.pdfPageCount || '?'} pages)`;
-      helperText = `No structured entities yet for this PDF document. Clicking the button runs langextract once over the full document text (extracted via docling or pdftotext). Typically 30–120s on local Gemma depending on document size.`;
-      statusText = `Idle — click to extract entities across all ${page.pdfPageCount || '?'} pages`;
-    } else if (haveAnalysis) {
-      buttonLabel = 'Extract entities';
-      helperText = 'No structured entities yet for this page.';
-      statusText = 'Idle — click "Extract entities" to run langextract on the cached analysis';
-    } else {
-      buttonLabel = 'Generate analysis & extract entities';
-      helperText = 'No analysis cached yet — clicking the button below will run the description + explanation analysis first, then extract entities. This typically takes 1–3 minutes total on local Gemma.';
-      statusText = 'Idle — analysis will run first, then entity extraction';
-    }
-    body.innerHTML = `
-      <div class="entities-empty">
-        <div>${helperText}</div>
-        <button id="entitiesGenerateBtn" type="button">${escapeHtml(buttonLabel)}</button>
-      </div>`;
-    const startBtn = $('entitiesGenerateBtn');
-    if (startBtn) {
-      startBtn.addEventListener('click', (event) => {
-        console.log('[entities] Extract button clicked', { pageId: page.id, pdfDocId: page.pdfDocId });
-        event.preventDefault();
-        runEntitiesExtraction(page);
-      });
-    } else {
-      console.warn('[entities] Extract button could not be found after innerHTML write');
-    }
-    setEntitiesStatus(statusText);
-    return;
-  }
-
-  const items = Array.isArray(entities.extractions) ? entities.extractions : [];
-  const stats = entities.stats || {};
-  const isPdf = Boolean(page.pdfDocId);
-
-  // Update view-tab availability + active state
-  const viewTabs = body.parentElement.querySelector('#entitiesViewTabs');
-  if (viewTabs) {
-    viewTabs.querySelectorAll('.ev-tab').forEach(tab => {
-      const v = tab.dataset.view;
-      const enabled = (v === 'class') || isPdf;
-      tab.disabled = !enabled;
-      tab.classList.toggle('active', v === entityViewMode);
-      tab.setAttribute('aria-selected', v === entityViewMode ? 'true' : 'false');
-    });
-  }
-  if (!isPdf && entityViewMode !== 'class') entityViewMode = 'class';
-
-  if (entityViewMode === 'outline' && page.pdfDocId) {
-    renderOutlineView(body, page);
-  } else if (entityViewMode === 'page' && isPdf) {
-    renderEntitiesByPage(body, items);
-  } else {
-    renderEntitiesByClass(body, items);
-  }
-
-  const total = stats.total ?? items.length;
-  const elapsed = stats.elapsed_ms ? `${(stats.elapsed_ms/1000).toFixed(1)}s` : '?';
-  const sourceMap = {
-    'pdf-doc-page-concat': 'source: pdftotext per-page concat (page-attributed)',
-    'pdf-doc-docling': 'source: docling whole-document extraction',
-    'pdf-doc-concat': 'source: pdftotext (concatenated pages)',
-    'pdf-extracted': 'source: pdftotext (single page)',
-    'vision-analysis': 'source: vision-derived analysis',
-  };
-  const sourceLabel = sourceMap[entities.sourceKind] || ('source: ' + (entities.sourceKind || 'unknown'));
-  const scopeLabel = entities.scope === 'document'
-    ? `scope: whole document${entities.pdfPageCount ? ` (${entities.pdfPageCount} pages)` : ''}${entities.sourceTruncated ? ` · TRUNCATED at first ${(entities.sourceText?.length || 0).toLocaleString()} of ${(entities.sourceFullLength || 0).toLocaleString()} chars` : ''}`
-    : 'scope: current page';
-  const byClassMap = items.reduce((a,e) => { (a[e.extraction_class] = a[e.extraction_class] || []).push(e); return a; }, {});
-  setEntitiesStatus(
-    `${items.length}/${(stats.total ?? items.length)} grounded · ${Object.keys(byClassMap).length} classes · ${elapsed} · model ${stats.model_id || 'local Gemma'} · ${scopeLabel} · ${sourceLabel}`
-  );
-}
-
-// ---- Entity view renderers ----
-
-function renderEntityCardHtml(items, e) {
-  const globalIdx = items.indexOf(e);
-  const pageNum = e.attributes?.page;
-  const attrs = Object.entries(e.attributes || {})
-    .filter(([k]) => k !== 'page')
-    .map(([k,v]) => `<span class="attr"><span class="attr-key">${escapeHtml(k)}</span>:${escapeHtml(String(v))}</span>`)
-    .join('');
-  const ci = e.char_interval || {};
-  const meta = (ci.start_pos !== undefined ? `${ci.start_pos}–${ci.end_pos}` : '');
-  const pageBadge = pageNum
-    ? `<span class="entity-page" title="Click card to jump to page ${pageNum}">${escapeHtml(String(pageNum))}</span>`
-    : '';
-  return `
-    <div class="entity-card" data-entity-index="${globalIdx}" data-class="${e.extraction_class}" ${pageNum ? `data-page="${pageNum}"` : ''}>
-      <div class="entity-text">${pageBadge}${escapeHtml(e.extraction_text)}</div>
-      ${attrs ? `<div class="entity-attrs">${attrs}</div>` : ''}
-      ${meta ? `<div class="entity-meta">${meta}</div>` : ''}
-    </div>`;
-}
-
-function renderEntitiesByClass(body, items) {
-  const byClass = items.reduce((acc, e) => { (acc[e.extraction_class] = acc[e.extraction_class] || []).push(e); return acc; }, {});
-  const orderedClasses = ['component','flow_step','concept','text_label','caption','data_point','cta'];
-  const classes = Object.keys(byClass).sort((a,b) => orderedClasses.indexOf(a) - orderedClasses.indexOf(b));
-  const summaryChips = classes.map(cls =>
-    `<button type="button" class="summary-chip ent-${cls}" data-class="${cls}" style="border-left: 3px solid var(--ent-color)">${entityClassLabel(cls)} · ${byClass[cls].length}</button>`
-  ).join('');
-  const sectionsHtml = classes.map(cls => {
-    const cards = byClass[cls].map(e => renderEntityCardHtml(items, e)).join('');
-    return `<section class="entities-class-section ent-${cls}">
-      <h3>${entityClassLabel(cls)}<span class="class-count">· ${byClass[cls].length}</span></h3>
-      ${cards || '<div class="entities-empty" style="padding:8px;text-align:left">none</div>'}
-    </section>`;
-  }).join('');
-
-  body.innerHTML = `
-    ${summaryChips ? `<div class="entities-summary">${summaryChips}</div>` : ''}
-    ${sectionsHtml || '<div class="entities-empty">No grounded extractions returned.</div>'}
-  `;
-  body.querySelectorAll('.entity-card').forEach(card => card.addEventListener('click', () => focusEntity(Number(card.dataset.entityIndex))));
-  body.querySelectorAll('.summary-chip').forEach(chip => chip.addEventListener('click', () => {
-    const cls = chip.dataset.class;
-    const target = body.querySelector(`.entities-class-section.ent-${cls}`);
-    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    body.querySelectorAll('.summary-chip').forEach(c => c.classList.toggle('active', c === chip));
-  }));
-}
-
-function renderEntitiesByPage(body, items) {
-  // Bucket entities by their attributes.page; entities without a page go in
-  // an "Unattributed" bucket at the end so the user sees what fell through.
-  const buckets = new Map();
-  for (const e of items) {
-    const p = e.attributes?.page;
-    const key = (typeof p === 'number') ? p : null;
-    if (!buckets.has(key)) buckets.set(key, []);
-    buckets.get(key).push(e);
-  }
-  const sortedPages = [...buckets.keys()].filter(k => k !== null).sort((a,b) => a - b);
-  const sections = [];
-  for (const p of sortedPages) {
-    const cards = buckets.get(p).map(e => renderEntityCardHtml(items, e)).join('');
-    sections.push(`<section class="entities-page-section" data-page="${p}">
-      <h3 data-jump="${p}" title="Jump to page ${p}">Page ${p}<span class="page-count">· ${buckets.get(p).length}</span></h3>
-      ${cards}
-    </section>`);
-  }
-  if (buckets.has(null)) {
-    const cards = buckets.get(null).map(e => renderEntityCardHtml(items, e)).join('');
-    sections.push(`<section class="entities-page-section" style="border-left-color:#d6cfc7">
-      <h3>Unattributed<span class="page-count">· ${buckets.get(null).length}</span></h3>
-      ${cards}
-    </section>`);
-  }
-  body.innerHTML = sections.join('') || '<div class="entities-empty">No page-attributed extractions.</div>';
-  body.querySelectorAll('.entity-card').forEach(card => card.addEventListener('click', () => focusEntity(Number(card.dataset.entityIndex))));
-  body.querySelectorAll('h3[data-jump]').forEach(h => h.addEventListener('click', () => jumpToPdfPage(Number(h.dataset.jump))));
-}
-
-async function renderOutlineView(body, page) {
-  const cached = outlineCache[page.pdfDocId];
-  if (!cached) {
-    body.innerHTML = `<div class="entities-empty"><span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid #ddd;border-top-color:#a23b31;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:8px"></span>Building outline from docling Markdown…</div>`;
-    try {
-      const res = await fetch(`/api/outline/${page.pdfDocId}`);
-      const data = await res.json();
-      if (!res.ok || !data.outline) {
-        body.innerHTML = `<div class="entities-empty">Outline failed: ${escapeHtml(data.error || 'HTTP ' + res.status)}</div>`;
-        return;
-      }
-      outlineCache[page.pdfDocId] = data.outline;
-    } catch (err) {
-      body.innerHTML = `<div class="entities-empty">Outline fetch threw: ${escapeHtml(err.message)}</div>`;
-      return;
-    }
-  }
-  const outline = outlineCache[page.pdfDocId];
-  const items = outline.items || [];
-  const pageList = outline.pages || [];
-  const headingsHtml = items.length
-    ? `<div class="outline-list">${items.map(it => {
-        const pageBadge = it.page
-          ? `<span class="page-badge">p.${it.page}</span>`
-          : `<span class="page-badge unmapped">—</span>`;
-        const cls = `outline-item lvl-${it.level} ${it.page ? '' : 'no-page'}`;
-        return `<div class="${cls}" ${it.page ? `data-page="${it.page}"` : ''}>
-          ${pageBadge}<span class="outline-text">${escapeHtml(it.text)}</span>
-        </div>`;
-      }).join('')}</div>`
-    : `<div class="entities-empty" style="padding:14px;text-align:left;color:#8a8378">No headings found in the docling Markdown for this document. The "Pages" list below provides per-page navigation.</div>`;
-
-  const pagesHtml = `<section class="outline-pages-section">
-    <h3>Pages</h3>
-    <div class="outline-list">${pageList.map(p =>
-      `<div class="outline-item lvl-2" data-page="${p.page}">
-        <span class="page-badge">p.${p.page}</span>
-        <span class="outline-text">${escapeHtml(p.firstLine || `Page ${p.page}`)}</span>
-      </div>`
-    ).join('')}</div>
-  </section>`;
-
-  body.innerHTML = headingsHtml + pagesHtml;
-  body.querySelectorAll('.outline-item[data-page]').forEach(el => {
-    el.addEventListener('click', () => jumpToPdfPage(Number(el.dataset.page)));
-  });
-}
-
-function jumpToPdfPage(pageNum) {
-  if (!Number.isFinite(pageNum)) return;
-  const cur = state.pages[state.currentIndex];
-  if (!cur?.pdfDocId) return;
-  const idx = state.pages.findIndex(p => p.pdfDocId === cur.pdfDocId && Number(p.pdfPageNumber) === pageNum);
-  if (idx < 0 || idx === state.currentIndex) return;
-  state.currentIndex = idx;
-  state.pendingClick = null;
-  renderCurrentPage();
-  updateUI();
-  saveSession();
-}
-
-function entitiesShowSpinner(message) {
-  const body = $('entitiesBody');
-  if (!body) return;
-  body.innerHTML = `
-    <div class="entities-empty">
-      <span class="spinner" style="display:inline-block;width:18px;height:18px;border:3px solid #ddd;border-top-color:#a23b31;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:10px"></span>${escapeHtml(message || 'Working…')}
-    </div>`;
-}
-
-function entitiesShowError(messageHtml, page) {
-  const body = $('entitiesBody');
-  if (!body) return;
-  body.innerHTML = `<div class="entities-empty"><div style="color:#a23b31;text-align:left;background:#fff7f5;border:1px solid #ead0cc;padding:10px 12px;border-radius:6px;margin-bottom:12px">${messageHtml}</div><button id="entitiesGenerateBtn" type="button">Try again</button></div>`;
-  const btn = $('entitiesGenerateBtn');
-  if (btn) btn.addEventListener('click', () => runEntitiesExtraction(page));
-}
-
-async function runEntitiesExtraction(pageOrId) {
-  // Accept either a page object or a pageId string for backward compat.
-  const page = (typeof pageOrId === 'string')
-    ? state.pages.find(p => p.id === pageOrId) || state.pages[state.currentIndex]
-    : pageOrId;
-  if (!page) return;
-  const isPdf = Boolean(page.pdfDocId);
-  const cacheKey = entitiesCacheKey(page);
-
-  console.log('[entities] runEntitiesExtraction', { pageId: page.id, pdfDocId: page.pdfDocId, cacheKey, alreadyLoading: entitiesLoadingId });
-  if (entitiesLoadingId) {
-    console.log('[entities] another extraction in flight; ignoring click');
-    return;
-  }
-  entitiesLoadingId = cacheKey;
-  entitiesShowSpinner(isPdf
-    ? `Extracting entities for the entire PDF document (${page.pdfPageCount || '?'} pages)…`
-    : 'Preparing…'
-  );
-  setEntitiesStatus('Working — preparing request');
-
-  try {
-    if (isPdf) {
-      // Doc-level path: server already has docling/pdftotext text from upload.
-      // Single POST does the work.
-      let data;
-      try {
-        const res = await fetch(`/api/entities/doc/${page.pdfDocId}`, { method: 'POST' });
-        console.log('[entities] /api/entities/doc status', res.status);
-        data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.entities) {
-          entitiesShowError(`Document entity extraction failed (HTTP ${res.status}). ${escapeHtml(data.error || '')}`, page);
-          setEntitiesStatus('Failed during document extraction');
-          return;
-        }
-      } catch (err) {
-        console.error('[entities] doc entities fetch threw', err);
-        entitiesShowError(`Entities fetch threw: ${escapeHtml(err.message)}`, page);
-        setEntitiesStatus('Network error during document extraction');
-        return;
-      }
-      entitiesCache[cacheKey] = data.entities;
-    } else {
-      // Per-page path: ensure analysis exists, then extract.
-      const cachedAnalysis = learnCache[page.id];
-      const haveAnalysis = Boolean(cachedAnalysis?.description || cachedAnalysis?.explanation);
-      if (!haveAnalysis) {
-        entitiesShowSpinner('Running analysis (description + explanation) — 30–90s on local Gemma…');
-        setEntitiesStatus('Running analysis (description + explanation)…');
-        try {
-          const aRes = await fetch(`/api/analysis/${page.id}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'both' }),
-          });
-          const aData = await aRes.json().catch(() => ({}));
-          if (!aRes.ok || (!aData.description && !aData.explanation)) {
-            entitiesShowError(`Analysis step failed (HTTP ${aRes.status}). ${escapeHtml(aData.error || '')}`, page);
-            setEntitiesStatus('Failed during analysis step');
-            return;
-          }
-          learnCache[page.id] = aData;
-        } catch (err) {
-          console.error('[entities] analysis fetch threw', err);
-          entitiesShowError(`Analysis fetch threw: ${escapeHtml(err.message)}`, page);
-          setEntitiesStatus('Network error during analysis');
-          return;
-        }
-      }
-      entitiesShowSpinner('Extracting entities via langextract — 30–90s on local Gemma…');
-      setEntitiesStatus('Extracting entities via langextract…');
-      let data;
-      try {
-        const res = await fetch(`/api/entities/${page.id}`, { method: 'POST' });
-        data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.entities) {
-          entitiesShowError(`Entity extraction failed (HTTP ${res.status}). ${escapeHtml(data.error || '')}`, page);
-          setEntitiesStatus('Failed during extraction step');
-          return;
-        }
-      } catch (err) {
-        console.error('[entities] entities fetch threw', err);
-        entitiesShowError(`Entities fetch threw: ${escapeHtml(err.message)}`, page);
-        setEntitiesStatus('Network error during extraction');
-        return;
-      }
-      entitiesCache[cacheKey] = data.entities;
-    }
-  } catch (err) {
-    console.error('[entities] unexpected error', err);
-    entitiesShowError(`Unexpected error: ${escapeHtml(err.message || String(err))}`, page);
-    setEntitiesStatus('Error: ' + (err.message || err));
-  } finally {
-    entitiesLoadingId = null;
-  }
-
-  // Re-render only if the user is still on a page sharing this scope
-  const stillOn = state.pages[state.currentIndex];
-  if (stillOn && entitiesCacheKey(stillOn) === cacheKey) {
-    renderEntitiesPanel();
-  }
-}
-
-function focusEntity(idx) {
-  activeEntityIndex = idx;
-  document.querySelectorAll('.entity-card').forEach(c => c.classList.toggle('active', Number(c.dataset.entityIndex) === idx));
-  const target = document.querySelector(`.entity-card[data-entity-index="${idx}"]`);
-  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-  // If the entity carries a page attribution and the current view is a PDF,
-  // jump to that page within the same document. The user clicked a typed
-  // entity card to navigate — keep the entities panel open.
-  const pageAttr = target?.dataset?.page;
-  if (!pageAttr) return;
-  const pageNum = Number(pageAttr);
-  if (!Number.isFinite(pageNum)) return;
-  const cur = state.pages[state.currentIndex];
-  if (!cur?.pdfDocId) return;
-  const targetIdx = state.pages.findIndex(p =>
-    p.pdfDocId === cur.pdfDocId && Number(p.pdfPageNumber) === pageNum
-  );
-  if (targetIdx >= 0 && targetIdx !== state.currentIndex) {
-    state.currentIndex = targetIdx;
-    state.pendingClick = null;
-    renderCurrentPage();
-    updateUI();
-    saveSession();
-  }
-}
-
 
 
 // --- Event listeners ---
@@ -2377,26 +1772,6 @@ $('learnTabs').addEventListener('click', (e) => {
 $('galleryBtn').addEventListener('click', openGallery);
 $('galleryClose').addEventListener('click', () => closePanel('gallery'));
 $('galleryOverlay').addEventListener('click', () => closePanel('gallery'));
-
-$('entitiesBtn').addEventListener('click', openEntities);
-$('entitiesClose').addEventListener('click', () => closePanel('entities'));
-$('entitiesOverlay').addEventListener('click', () => closePanel('entities'));
-$('entitiesViewTabs').addEventListener('click', (e) => {
-  const tab = e.target.closest('.ev-tab');
-  if (!tab || tab.disabled) return;
-  entityViewMode = tab.dataset.view;
-  renderEntitiesPanel();
-});
-$('entitiesRefreshBtn').addEventListener('click', () => {
-  const page = state.pages[state.currentIndex];
-  if (!page) return;
-  const key = entitiesCacheKey(page);
-  if (entitiesCache[key]) {
-    if (!confirm('Re-run entity extraction? This re-spends 30–120 seconds on the local Gemma model.')) return;
-  }
-  delete entitiesCache[key];
-  runEntitiesExtraction(page);
-});
 
 $('settingsBtn').addEventListener('click', openSettings);
 $('settingsClose').addEventListener('click', () => closePanel('settings'));
