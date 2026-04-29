@@ -1,3 +1,9 @@
 node_modules/
 .env
 generated/
+
+# langextract experiment — keep venvs and reproducible outputs out
+demos/*/.venv/
+demos/*/extraction.jsonl
+demos/*/visualization.html
+demos/*/__pycache__/
