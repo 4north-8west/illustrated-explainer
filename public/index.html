@@ -1904,7 +1904,16 @@ function renderEntitiesPanel() {
         <div>${helperText}</div>
         <button id="entitiesGenerateBtn" type="button">${buttonLabel}</button>
       </div>`;
-    $('entitiesGenerateBtn').addEventListener('click', () => runEntitiesExtraction(page.id));
+    const startBtn = $('entitiesGenerateBtn');
+    if (startBtn) {
+      startBtn.addEventListener('click', (event) => {
+        console.log('[entities] Extract button clicked', { pageId: page.id });
+        event.preventDefault();
+        runEntitiesExtraction(page.id);
+      });
+    } else {
+      console.warn('[entities] Extract button could not be found after innerHTML write');
+    }
     setEntitiesStatus(haveAnalysis
       ? 'Idle — click "Extract entities" to run langextract on the cached analysis'
       : 'Idle — analysis will run first, then entity extraction'
@@ -1969,56 +1978,99 @@ function renderEntitiesPanel() {
   );
 }
 
+function entitiesShowSpinner(message) {
+  const body = $('entitiesBody');
+  if (!body) return;
+  body.innerHTML = `
+    <div class="entities-empty">
+      <span class="spinner" style="display:inline-block;width:18px;height:18px;border:3px solid #ddd;border-top-color:#a23b31;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:10px"></span>${escapeHtml(message || 'Working…')}
+    </div>`;
+}
+
+function entitiesShowError(messageHtml, pageId) {
+  const body = $('entitiesBody');
+  if (!body) return;
+  body.innerHTML = `<div class="entities-empty"><div style="color:#a23b31;text-align:left;background:#fff7f5;border:1px solid #ead0cc;padding:10px 12px;border-radius:6px;margin-bottom:12px">${messageHtml}</div><button id="entitiesGenerateBtn" type="button">Try again</button></div>`;
+  const btn = $('entitiesGenerateBtn');
+  if (btn) btn.addEventListener('click', () => runEntitiesExtraction(pageId));
+}
+
 async function runEntitiesExtraction(pageId) {
-  if (entitiesLoadingId) return;
+  console.log('[entities] runEntitiesExtraction', { pageId, alreadyLoading: entitiesLoadingId });
+  if (entitiesLoadingId) {
+    console.log('[entities] another extraction in flight; ignoring click');
+    return;
+  }
   entitiesLoadingId = pageId;
-  renderEntitiesPanel();
+  // Force visible feedback BEFORE awaiting anything, in case any later step
+  // throws synchronously or yields very quickly with an error.
+  entitiesShowSpinner('Preparing…');
+  setEntitiesStatus('Working — preparing request');
+
   try {
-    // Step 1: ensure analysis exists. If not, run it now (this is the path
-    // for users who land on Entities without ever opening Learn).
     const cachedAnalysis = learnCache[pageId];
     const haveAnalysis = Boolean(cachedAnalysis?.description || cachedAnalysis?.explanation);
+    console.log('[entities] step 1: haveAnalysis=', haveAnalysis);
+
     if (!haveAnalysis) {
+      entitiesShowSpinner('Running analysis (description + explanation) — 30–90s on local Gemma…');
       setEntitiesStatus('Running analysis (description + explanation)…');
-      const aRes = await fetch(`/api/analysis/${pageId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'both' }),
-      });
-      const aData = await aRes.json();
-      if (!aRes.ok || (!aData.description && !aData.explanation)) {
-        entitiesLoadingId = null;
-        const body = $('entitiesBody');
-        body.innerHTML = `<div class="entities-empty">Analysis failed: ${escapeHtml(aData.error || ('HTTP ' + aRes.status))}<br><br><button id="entitiesGenerateBtn" type="button">Try again</button></div>`;
-        $('entitiesGenerateBtn')?.addEventListener('click', () => runEntitiesExtraction(pageId));
-        setEntitiesStatus('Failed during analysis step');
+      let aData;
+      try {
+        const aRes = await fetch(`/api/analysis/${pageId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'both' }),
+        });
+        console.log('[entities] /api/analysis status', aRes.status);
+        aData = await aRes.json().catch(() => ({}));
+        if (!aRes.ok || (!aData.description && !aData.explanation)) {
+          entitiesShowError(`Analysis step failed (HTTP ${aRes.status}). ${escapeHtml(aData.error || '')}`, pageId);
+          setEntitiesStatus('Failed during analysis step');
+          return;
+        }
+        learnCache[pageId] = aData;
+      } catch (err) {
+        console.error('[entities] analysis fetch threw', err);
+        entitiesShowError(`Analysis fetch threw: ${escapeHtml(err.message)}`, pageId);
+        setEntitiesStatus('Network error during analysis');
         return;
       }
-      learnCache[pageId] = aData;
     }
 
     // Step 2: extract entities
+    entitiesShowSpinner('Extracting entities via langextract — 30–90s on local Gemma…');
     setEntitiesStatus('Extracting entities via langextract…');
-    const res = await fetch(`/api/entities/${pageId}`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok || !data.entities) {
-      entitiesLoadingId = null;
-      const body = $('entitiesBody');
-      body.innerHTML = `<div class="entities-empty">Extraction failed: ${escapeHtml(data.error || ('HTTP ' + res.status))}<br><br><button id="entitiesGenerateBtn" type="button">Try again</button></div>`;
-      $('entitiesGenerateBtn')?.addEventListener('click', () => runEntitiesExtraction(pageId));
-      setEntitiesStatus('Failed during extraction step');
+    let data;
+    try {
+      const res = await fetch(`/api/entities/${pageId}`, { method: 'POST' });
+      console.log('[entities] /api/entities status', res.status);
+      data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.entities) {
+        entitiesShowError(`Entity extraction failed (HTTP ${res.status}). ${escapeHtml(data.error || '')}`, pageId);
+        setEntitiesStatus('Failed during extraction step');
+        return;
+      }
+    } catch (err) {
+      console.error('[entities] entities fetch threw', err);
+      entitiesShowError(`Entities fetch threw: ${escapeHtml(err.message)}`, pageId);
+      setEntitiesStatus('Network error during extraction');
       return;
     }
+
     entitiesCache[pageId] = data.entities;
+    console.log('[entities] cached', data.entities.extractions?.length, 'extractions');
   } catch (err) {
-    setEntitiesStatus('Error: ' + err.message);
+    console.error('[entities] unexpected error', err);
+    entitiesShowError(`Unexpected error: ${escapeHtml(err.message || String(err))}`, pageId);
+    setEntitiesStatus('Error: ' + (err.message || err));
   } finally {
     entitiesLoadingId = null;
   }
+
   if (state.pages[state.currentIndex]?.id === pageId) {
     renderEntitiesPanel();
     refreshSourceHighlights();
-    // Kick bbox load if user has the toggle enabled
     if (document.body.classList.contains('show-entity-bboxes')) {
       ensureBboxesLoaded(pageId).then(() => renderBboxLayer(pageId));
     }
