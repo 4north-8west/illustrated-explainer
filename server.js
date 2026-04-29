@@ -1235,6 +1235,43 @@ function detectPdfMetadata(pdfPath) {
   return { pages, tagged, title };
 }
 
+function extractPdfPageText(pdfPath, pageNumber) {
+  try {
+    return execFileSync(
+      'pdftotext',
+      ['-layout', '-enc', 'UTF-8', '-f', String(pageNumber), '-l', String(pageNumber), pdfPath, '-'],
+      { encoding: 'utf8', timeout: 15000, maxBuffer: 4 * 1024 * 1024 }
+    );
+  } catch (err) {
+    console.warn(`[upload-pdf] pdftotext failed on page ${pageNumber}: ${err.message}`);
+    return '';
+  }
+}
+
+function synthesizePdfPageContext({ text, pageNumber, pageCount, tagged, title, label }) {
+  const trimmed = text.trim();
+  const taggedLine = tagged ? 'tagged' : 'untagged';
+  const titleLine = title ? `**Document title**: ${title}\n` : '';
+  return `# Source Context
+
+## Image Type
+PDF page (text extracted directly via \`pdftotext -layout\` — no vision model call). ${titleLine}**PDF page**: ${pageNumber} of ${pageCount}; **status**: ${taggedLine}; **upload label**: ${label}.
+
+## OCR / Transcription
+The following text was extracted from the PDF page in reading order. For tagged PDFs this comes from the structure tree; for untagged-but-text-bearing PDFs it is pdftotext's layout-aware approximation.
+
+\`\`\`
+${trimmed}
+\`\`\`
+
+## Structure
+This context was generated without a vision call, so it does not yet describe spatial layout, figures, or visual emphasis. Open the **Learn** panel on this page to add a vision-derived description that complements the extracted text above.
+
+## Key Concepts
+Open the **Entities** panel to extract a structured list of components, concepts, flow steps, and other typed entities from the page text.
+`;
+}
+
 function renderPdfPage(pdfPath, pageNumber, outPrefix, dpi = 150) {
   const args = [
     '-r', String(dpi),
@@ -1319,6 +1356,62 @@ app.post('/api/upload-pdf', async (req, res) => {
           }
         }
       }
+      // Phase 2: per-page text extraction. For pages with meaningful embedded
+      // text (tagged or simply text-bearing PDFs), persist a synthetic
+      // upload_context page so the existing three-column source-layout
+      // renders the real page text on first view, no vision call needed.
+      const pageText = extractPdfPageText(pdfPath, n);
+      const pageTextTrimmed = pageText.trim();
+      const hasMeaningfulText = pageTextTrimmed.length >= 30;
+      let contextPageId = null;
+      if (hasMeaningfulText) {
+        const ctxId = uploadContextPageId(pageId);
+        const ctxContent = synthesizePdfPageContext({
+          text: pageText,
+          pageNumber: n,
+          pageCount: info.pages,
+          tagged: info.tagged,
+          title: info.title,
+          label: trimmedLabel,
+        });
+        const ctxPage = {
+          id: ctxId,
+          type: 'markdown',
+          title: 'Source context',
+          content: ctxContent,
+          source: 'pdftotext-layout',
+          parentId: pageId,
+          parentClick: null,
+          initialQuery: trimmedLabel,
+          mode,
+          intent: 'PDF page text extraction',
+          generatedAt: new Date().toISOString(),
+        };
+        savePageContent(folder, ctxId, ctxPage);
+        pageMeta[ctxId] = {
+          folder,
+          query: trimmedLabel,
+          mode,
+          type: 'upload_context',
+          parentId: pageId,
+          parentClick: null,
+          intent: ctxPage.intent,
+        };
+        contextPageId = ctxId;
+
+        // Also surface the extracted text in the analysis JSON so the
+        // Entities/langextract pipeline can prefer it over vision-derived
+        // description+explanation when present.
+        const existingAnalysis = loadAnalysis(pageId) || {};
+        existingAnalysis.extracted = {
+          text: pageText,
+          source: 'pdftotext-layout',
+          wordCount: pageTextTrimmed.split(/\s+/).length,
+          generatedAt: new Date().toISOString(),
+        };
+        saveAnalysis(pageId, existingAnalysis);
+      }
+
       pageMeta[pageId] = {
         folder,
         query: trimmedLabel,
@@ -1330,6 +1423,8 @@ app.post('/api/upload-pdf', async (req, res) => {
         pdfPageCount: info.pages,
         pdfTagged: info.tagged,
         pdfTitle: info.title || null,
+        contextPageId,
+        pdfHasText: hasMeaningfulText,
       };
       pages.push({
         id: pageId,
@@ -1344,6 +1439,8 @@ app.post('/api/upload-pdf', async (req, res) => {
         pdfPageCount: info.pages,
         pdfTagged: info.tagged,
         pdfTitle: info.title || null,
+        contextPageId,
+        pdfHasText: hasMeaningfulText,
       });
     }
     saveMetadata(pageMeta);
@@ -2191,15 +2288,26 @@ app.post('/api/entities/:pageId', async (req, res) => {
     return res.status(400).json({ error: 'Invalid page ID' });
   }
   const analysis = loadAnalysis(pageId);
-  if (!analysis || (!analysis.description && !analysis.explanation)) {
+  const extractedText = analysis?.extracted?.text?.trim() || '';
+  const hasVision = Boolean(analysis?.description || analysis?.explanation);
+  if (!analysis || (!extractedText && !hasVision)) {
     return res.status(400).json({
-      error: 'No analysis text available — generate the description/explanation first.',
+      error: 'No source text available — for image pages, run Learn analysis first; for PDF pages, this means the PDF had no extractable text.',
     });
   }
 
-  const text = [analysis.description, analysis.explanation]
-    .filter(Boolean)
-    .join('\n\n');
+  // Phase 2: prefer the directly-extracted PDF text when present. For
+  // image pages and image-PDF pages with no embedded text, fall back to the
+  // existing vision-derived description+explanation.
+  let text;
+  let sourceKind;
+  if (extractedText) {
+    text = extractedText;
+    sourceKind = 'pdf-extracted';
+  } else {
+    text = [analysis.description, analysis.explanation].filter(Boolean).join('\n\n');
+    sourceKind = 'vision-analysis';
+  }
 
   console.log(`[entities] Running langextract for ${pageId} (${text.length} chars)...`);
   const result = await runLangextractHelper(text);
@@ -2213,13 +2321,14 @@ app.post('/api/entities/:pageId', async (req, res) => {
     extractions: result.extractions,
     stats: result.stats,
     sourceText: text,
+    sourceKind,
     generatedAt: new Date().toISOString(),
   };
   saveAnalysis(pageId, analysis);
 
   console.log(
     `[entities] ${result.stats.grounded || 0}/${result.stats.total || 0} grounded ` +
-    `in ${result.stats.elapsed_ms || '?'}ms`
+    `in ${result.stats.elapsed_ms || '?'}ms (source: ${sourceKind})`
   );
   res.json({ entities: analysis.entities });
 });
