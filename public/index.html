@@ -627,6 +627,39 @@ async function fetchSavedPage(pageId) {
   return page;
 }
 
+// When an image page is loaded into the session (gallery click, session restore,
+// or a cache-hit on generation), the saved-page response only returns that page.
+// The server still has any drill-down descendants on disk; pull them lazily so
+// the persistent drill-target markers reappear without forcing the user to
+// re-navigate. Dedup by pageId so we never refetch in the same tab.
+const _descendantsFetched = new Set();
+async function ensureDescendantsLoaded(pageId) {
+  if (!pageId || _descendantsFetched.has(pageId)) return;
+  _descendantsFetched.add(pageId);
+  try {
+    const res = await fetch(`/api/page/${pageId}/children`);
+    if (!res.ok) return;
+    const { children } = await res.json();
+    if (!Array.isArray(children) || !children.length) return;
+    let added = 0;
+    for (const child of children) {
+      if (!child || !child.id) continue;
+      if (state.pages.some(p => p.id === child.id)) continue;
+      state.pages.push(child);
+      added++;
+    }
+    if (added) {
+      // Re-render to surface the now-derivable drill targets; do not move
+      // currentIndex — user stays on the page they were viewing.
+      renderCurrentPage();
+      updateUI();
+      saveSession();
+    }
+  } catch (err) {
+    console.warn('ensureDescendantsLoaded failed:', err);
+  }
+}
+
 async function restoreSession() {
   let saved;
   try {
@@ -928,6 +961,9 @@ function renderCurrentPage() {
     canvas.innerHTML = 'Type a topic above — or upload your own image to start drilling into it';
     return;
   }
+  // Lazy-load any persisted drill descendants so previously-created drill
+  // targets are visible even after a session restore or gallery reload.
+  if (page.type === 'image') ensureDescendantsLoaded(page.id);
 
   canvas.className = 'canvas-area';
   canvas.innerHTML = '';

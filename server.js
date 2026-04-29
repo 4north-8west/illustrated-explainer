@@ -1461,6 +1461,36 @@ app.get('/api/page/:pageId', (req, res) => {
   res.json({ page });
 });
 
+// Return all descendants of a page (children, grandchildren, ...) so the
+// frontend can rebuild drill-target overlays after a session restore or a
+// single-page load from the gallery.
+app.get('/api/page/:pageId/children', (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
+    return res.status(400).json({ error: 'Invalid page ID' });
+  }
+  if (!pageMeta[pageId]) {
+    return res.status(404).json({ error: 'Page not found' });
+  }
+  const descendants = [];
+  const queue = [pageId];
+  const seen = new Set([pageId]);
+  while (queue.length) {
+    const current = queue.shift();
+    for (const [id, meta] of Object.entries(pageMeta)) {
+      if (meta.parentId === current && !seen.has(id)) {
+        seen.add(id);
+        const child = pageFromMetadata(id);
+        if (child) {
+          descendants.push(child);
+          queue.push(id);
+        }
+      }
+    }
+  }
+  res.json({ children: descendants });
+});
+
 app.post('/api/page', async (req, res) => {
   const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind, responseDepth: reqResponseDepth, language: reqLanguage } = req.body;
   const responseKind = ['markdown', 'chart', 'table', 'diagram'].includes(reqResponseKind) ? reqResponseKind : 'image';
