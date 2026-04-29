@@ -2399,9 +2399,16 @@ function saveDocAnalysis(pdfDocId, data) {
 }
 
 function findPdfDocSourceText(pdfDocId) {
-  // Prefer the docling Markdown if it was produced at upload time. Otherwise
-  // concatenate per-page pdftotext output from each page's analysis.extracted
-  // field, with page markers so the model gets natural document structure.
+  // For entity extraction we always build the source as a per-page pdftotext
+  // concatenation with `## Page N` markers. This costs us some structural
+  // fidelity vs. docling Markdown, but in exchange every extraction's
+  // char_interval falls inside a known page range, so we can attribute each
+  // entity to a specific PDF page (Phase 3 step 1).
+  //
+  // The richer docling Markdown is still produced at upload time and remains
+  // available at generated/upload-pdf-<slug>/doc-<pdfDocId>.md for display in
+  // the source-content panels — entity *input* and source-content *display*
+  // serve different purposes.
   const pages = [];
   for (const [id, m] of Object.entries(pageMeta)) {
     if (m.pdfDocId === pdfDocId) pages.push({ id, m });
@@ -2409,22 +2416,40 @@ function findPdfDocSourceText(pdfDocId) {
   if (!pages.length) return null;
   pages.sort((a, b) => (a.m.pdfPageNumber || 0) - (b.m.pdfPageNumber || 0));
 
-  // First: docling Markdown
-  const sample = pages[0].m;
-  const docMdPath = path.join(GENERATED_DIR, sample.folder, `doc-${pdfDocId}.md`);
-  if (fs.existsSync(docMdPath)) {
-    return { text: fs.readFileSync(docMdPath, 'utf8'), source: 'pdf-doc-docling' };
-  }
-
-  // Fallback: concatenate per-page extracted text
   const parts = [];
+  const pageOffsets = []; // [{ page, start, end }] — char ranges in the joined text
+  let cursor = 0;
   for (const { id, m } of pages) {
     const a = loadAnalysis(id);
     const t = (a?.extracted?.text || '').trim();
-    if (t) parts.push(`## Page ${m.pdfPageNumber}\n\n${t}\n`);
+    if (!t) continue;
+    const header = `## Page ${m.pdfPageNumber}\n\n`;
+    const block = header + t + '\n\n';
+    pageOffsets.push({ page: m.pdfPageNumber, start: cursor, end: cursor + block.length });
+    parts.push(block);
+    cursor += block.length;
   }
   if (!parts.length) return null;
-  return { text: parts.join('\n'), source: 'pdf-doc-concat' };
+  return { text: parts.join(''), source: 'pdf-doc-page-concat', pageOffsets };
+}
+
+// Mutate each extraction in place to add `attributes.page` based on which
+// `## Page N` block its char_interval falls in.
+function attributePagesToExtractions(extractions, pageOffsets) {
+  if (!Array.isArray(pageOffsets) || !pageOffsets.length) return 0;
+  let attributed = 0;
+  for (const e of extractions) {
+    const start = e?.char_interval?.start_pos;
+    if (typeof start !== 'number') continue;
+    for (const off of pageOffsets) {
+      if (start >= off.start && start < off.end) {
+        e.attributes = Object.assign({}, e.attributes || {}, { page: off.page });
+        attributed++;
+        break;
+      }
+    }
+  }
+  return attributed;
 }
 
 app.get('/api/entities/doc/:pdfDocId', (req, res) => {
@@ -2477,6 +2502,18 @@ app.post('/api/entities/doc/:pdfDocId', async (req, res) => {
     console.error(`[entities-doc] ${result.error}`);
     return res.status(502).json({ error: result.error });
   }
+  // Attribute each extraction to its source page. Truncated runs use a
+  // pageOffsets list shortened at the cap so we don't claim an entity came
+  // from a page that wasn't actually fed to the model.
+  const sourcePageOffsets = sourceObj.pageOffsets || [];
+  const truncatedPageOffsets = sourcePageOffsets.filter(o => o.start < inputText.length).map(o => ({
+    page: o.page,
+    start: o.start,
+    end: Math.min(o.end, inputText.length),
+  }));
+  const attributed = attributePagesToExtractions(result.extractions, truncatedPageOffsets);
+  console.log(`[entities-doc] attributed ${attributed}/${result.extractions.length} extractions to pages`);
+
   const docData = loadDocAnalysis(pdfDocId) || {};
   docData.entities = {
     extractions: result.extractions,
@@ -2487,6 +2524,8 @@ app.post('/api/entities/doc/:pdfDocId', async (req, res) => {
     sourceKind: sourceObj.source,
     scope: 'document',
     pdfPageCount,
+    pageOffsets: truncatedPageOffsets,
+    pagesCovered: truncatedPageOffsets.map(o => o.page),
     generatedAt: new Date().toISOString(),
   };
   saveDocAnalysis(pdfDocId, docData);
