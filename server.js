@@ -2062,6 +2062,102 @@ app.post('/api/entities/:pageId', async (req, res) => {
   res.json({ entities: analysis.entities });
 });
 
+// --- Image-region bounding boxes (vision call) ---
+const BBOX_SYSTEM =
+  'You are a layout analyst. Identify labeled visible elements in an image and return strict JSON only.';
+const BBOX_PROMPT = `Identify the major labeled visible elements in this image — boxes, icons, arrows, headings, titles, captions, callouts. For each, return:
+- "label": the visible text/name as it appears (verbatim, no paraphrase)
+- "bbox": [x0, y0, x1, y1] in normalized 0.0–1.0 coordinates with origin at the top-left
+
+Return strict JSON only:
+{"elements": [{"label": "...", "bbox": [x0, y0, x1, y1]}, ...]}
+
+Rules:
+- Only include elements that have clearly visible text labels.
+- Coordinates must be normalized 0.0–1.0 (do not return pixel coordinates).
+- Each bbox should tightly enclose the labeled element including its label text.
+- Maximum 30 elements; choose the most prominent labeled regions.
+- Do not invent labels not visible in the image.`;
+
+function parseBboxResponse(text) {
+  if (!text) return [];
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) return [];
+  let obj;
+  try {
+    obj = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  const elements = Array.isArray(obj.elements) ? obj.elements : [];
+  const cleaned = [];
+  for (const el of elements) {
+    if (!el || typeof el.label !== 'string') continue;
+    const label = el.label.trim();
+    if (!label) continue;
+    const bbox = Array.isArray(el.bbox) ? el.bbox.map(Number) : null;
+    if (!bbox || bbox.length !== 4) continue;
+    if (bbox.some(v => !Number.isFinite(v))) continue;
+    let [x0, y0, x1, y1] = bbox;
+    if (x1 < x0) [x0, x1] = [x1, x0];
+    if (y1 < y0) [y0, y1] = [y1, y0];
+    x0 = Math.max(0, Math.min(1, x0));
+    y0 = Math.max(0, Math.min(1, y0));
+    x1 = Math.max(0, Math.min(1, x1));
+    y1 = Math.max(0, Math.min(1, y1));
+    if (x1 - x0 < 0.005 || y1 - y0 < 0.005) continue;
+    cleaned.push({ label, bbox: [x0, y0, x1, y1] });
+  }
+  return cleaned.slice(0, 30);
+}
+
+app.get('/api/bboxes/:pageId', (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
+    return res.status(400).json({ error: 'Invalid page ID' });
+  }
+  const cached = loadAnalysis(pageId);
+  if (cached && cached.bboxes) return res.json({ bboxes: cached.bboxes });
+  res.json({ bboxes: null });
+});
+
+app.post('/api/bboxes/:pageId', async (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
+    return res.status(400).json({ error: 'Invalid page ID' });
+  }
+  const meta = pageMeta[pageId];
+  if (!meta) return res.status(404).json({ error: 'Page not found in metadata' });
+  const imagePath = path.join(GENERATED_DIR, meta.folder, `${pageId}.png`);
+  if (!fs.existsSync(imagePath)) return res.status(404).json({ error: 'Image file not found' });
+
+  const analysis = loadAnalysis(pageId) || { description: null, explanation: null };
+
+  try {
+    const resized = await sharp(imagePath).resize({ width: 1024, withoutEnlargement: true }).png().toBuffer();
+    const imageBase64 = resized.toString('base64');
+    console.log(`[bboxes] Generating bounding boxes for ${pageId}...`);
+    const started = Date.now();
+    const result = await analyzeImage(imageBase64, BBOX_SYSTEM, BBOX_PROMPT);
+    const elements = parseBboxResponse(result.text);
+    const elapsedMs = Date.now() - started;
+    analysis.bboxes = {
+      elements,
+      generatedAt: new Date().toISOString(),
+      source: result.source,
+      elapsedMs,
+      raw: result.text.slice(0, 4000),
+    };
+    saveAnalysis(pageId, analysis);
+    console.log(`[bboxes] ${elements.length} elements in ${elapsedMs}ms via ${result.source}`);
+    res.json({ bboxes: analysis.bboxes });
+  } catch (err) {
+    console.error(`[bboxes] failed: ${err.message}`);
+    res.status(502).json({ error: `Bounding box generation failed: ${err.message}` });
+  }
+});
+
 // --- Gallery API ---
 
 app.get('/api/gallery', (_req, res) => {
