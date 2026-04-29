@@ -253,6 +253,30 @@
   .entities-header h2 { font-size: 15px; font-weight: 600; color: #444; margin: 0; }
   .entities-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .entities-refresh { padding: 4px 12px; font-size: 12px; }
+  .entities-view-tabs { display: flex; gap: 0; border: 1px solid #d6cfc7; border-radius: 6px; overflow: hidden; }
+  .ev-tab { padding: 4px 11px; border: none; background: #fff; font-family: inherit; font-size: 12px; cursor: pointer; color: #6e655a; border-right: 1px solid #ece6de; transition: background 0.12s, color 0.12s; }
+  .ev-tab:last-child { border-right: none; }
+  .ev-tab:hover:not(.active) { background: #f9f5f0; color: #2c2925; }
+  .ev-tab.active { background: #a23b31; color: #fff; }
+  .ev-tab:disabled { opacity: 0.4; cursor: default; }
+  /* Page-grouped + Outline views */
+  .entities-page-section { margin-bottom: 14px; padding-left: 8px; border-left: 3px solid #d6cfc7; }
+  .entities-page-section h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: #6e655a; margin: 0 0 6px; text-transform: uppercase; cursor: pointer; }
+  .entities-page-section h3:hover { color: #a23b31; }
+  .entities-page-section .page-count { color: #aaa; font-weight: 400; margin-left: 6px; }
+  .outline-list { display: flex; flex-direction: column; gap: 4px; }
+  .outline-item { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border: 1px solid #ece6de; border-radius: 6px; background: #fff; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+  .outline-item:hover { border-color: #a23b31; background: #fff7f5; }
+  .outline-item.no-page { cursor: default; opacity: 0.7; }
+  .outline-item .page-badge { font-family: "SF Mono", ui-monospace, monospace; font-size: 11px; color: #a23b31; font-weight: 600; flex-shrink: 0; min-width: 36px; }
+  .outline-item .page-badge.unmapped { color: #b8aea0; }
+  .outline-item .outline-text { font-size: 13px; color: #2c2925; line-height: 1.35; word-break: break-word; }
+  .outline-item.lvl-1 .outline-text { font-weight: 700; font-size: 14px; }
+  .outline-item.lvl-2 .outline-text { font-weight: 600; }
+  .outline-item.lvl-3 { padding-left: 22px; }
+  .outline-item.lvl-3 .outline-text { color: #57534e; }
+  .outline-pages-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid #ece6de; }
+  .outline-pages-section h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8a8378; margin: 0 0 8px; font-family: "SF Mono", ui-monospace, monospace; }
   .entities-status { padding: 8px 16px; font-size: 11px; color: #8a8378; background: #f5f1ec; border-bottom: 1px solid #ece6de; min-height: 16px; font-family: "SF Mono", ui-monospace, monospace; }
   .entities-body { flex: 1; overflow-y: auto; padding: 14px 16px 22px; }
   .entities-empty { padding: 32px 18px; color: #999; text-align: center; font-size: 13px; line-height: 1.55; }
@@ -365,6 +389,11 @@
   <div class="entities-header">
     <h2 id="entitiesPanelTitle">Structured Entities</h2>
     <div class="entities-controls">
+      <div class="entities-view-tabs" id="entitiesViewTabs" role="tablist" aria-label="Entity view">
+        <button class="ev-tab active" data-view="class" role="tab" aria-selected="true" title="Group entities by class">Class</button>
+        <button class="ev-tab" data-view="page" role="tab" aria-selected="false" title="Group entities by source page (PDF only)">Page</button>
+        <button class="ev-tab" data-view="outline" role="tab" aria-selected="false" title="Document outline / TOC (PDF only)">Outline</button>
+      </div>
       <button class="btn entities-refresh" id="entitiesRefreshBtn" title="Re-run langextract on the current analysis text">Refresh</button>
       <button class="panel-close" id="entitiesClose" aria-label="Close entities panel">&times;</button>
     </div>
@@ -1848,6 +1877,12 @@ function entitiesCacheKey(page) {
   return page.pdfDocId ? `doc-${page.pdfDocId}` : page.id;
 }
 
+// View mode for the entities panel: 'class' | 'page' | 'outline'.
+// 'page' and 'outline' only make sense for PDF docs; we auto-fall-back to
+// 'class' for non-PDF pages.
+let entityViewMode = 'class';
+const outlineCache = {}; // pdfDocId -> { items, pages, sourceKind }
+
 async function openEntities() {
   const page = state.pages[state.currentIndex];
   if (!page) return;
@@ -1951,56 +1986,28 @@ function renderEntitiesPanel() {
 
   const items = Array.isArray(entities.extractions) ? entities.extractions : [];
   const stats = entities.stats || {};
-  const byClass = items.reduce((acc, e) => { (acc[e.extraction_class] = acc[e.extraction_class] || []).push(e); return acc; }, {});
-  const orderedClasses = ['component','flow_step','concept','text_label','caption','data_point','cta'];
-  const classes = Object.keys(byClass).sort((a,b) => orderedClasses.indexOf(a) - orderedClasses.indexOf(b));
+  const isPdf = Boolean(page.pdfDocId);
 
-  const summaryChips = classes.map(cls =>
-    `<button type="button" class="summary-chip ent-${cls}" data-class="${cls}" style="border-left: 3px solid var(--ent-color)">${entityClassLabel(cls)} · ${byClass[cls].length}</button>`
-  ).join('');
-
-  const sectionsHtml = classes.map((cls, ci) => {
-    const cards = byClass[cls].map((e, idx) => {
-      const globalIdx = items.indexOf(e);
-      const pageNum = e.attributes?.page;
-      const attrs = Object.entries(e.attributes || {})
-        .filter(([k]) => k !== 'page') // page is rendered as its own badge
-        .map(([k,v]) => `<span class="attr"><span class="attr-key">${escapeHtml(k)}</span>:${escapeHtml(String(v))}</span>`)
-        .join('');
-      const ci = e.char_interval || {};
-      const meta = (ci.start_pos !== undefined ? `${ci.start_pos}–${ci.end_pos}` : '');
-      const pageBadge = pageNum
-        ? `<span class="entity-page" title="Click card to jump to page ${pageNum}">${escapeHtml(String(pageNum))}</span>`
-        : '';
-      return `
-        <div class="entity-card" data-entity-index="${globalIdx}" data-class="${cls}" ${pageNum ? `data-page="${pageNum}"` : ''}>
-          <div class="entity-text">${pageBadge}${escapeHtml(e.extraction_text)}</div>
-          ${attrs ? `<div class="entity-attrs">${attrs}</div>` : ''}
-          ${meta ? `<div class="entity-meta">${meta}</div>` : ''}
-        </div>`;
-    }).join('');
-    return `<section class="entities-class-section ent-${cls}">
-      <h3>${entityClassLabel(cls)}<span class="class-count">· ${byClass[cls].length}</span></h3>
-      ${cards || '<div class="entities-empty" style="padding:8px;text-align:left">none</div>'}
-    </section>`;
-  }).join('');
-
-  body.innerHTML = `
-    ${summaryChips ? `<div class="entities-summary">${summaryChips}</div>` : ''}
-    ${sectionsHtml || '<div class="entities-empty">No grounded extractions returned.</div>'}
-  `;
-
-  body.querySelectorAll('.entity-card').forEach(card => {
-    card.addEventListener('click', () => focusEntity(Number(card.dataset.entityIndex)));
-  });
-  body.querySelectorAll('.summary-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-      const cls = chip.dataset.class;
-      const target = body.querySelector(`.entities-class-section.ent-${cls}`);
-      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      body.querySelectorAll('.summary-chip').forEach(c => c.classList.toggle('active', c === chip));
+  // Update view-tab availability + active state
+  const viewTabs = body.parentElement.querySelector('#entitiesViewTabs');
+  if (viewTabs) {
+    viewTabs.querySelectorAll('.ev-tab').forEach(tab => {
+      const v = tab.dataset.view;
+      const enabled = (v === 'class') || isPdf;
+      tab.disabled = !enabled;
+      tab.classList.toggle('active', v === entityViewMode);
+      tab.setAttribute('aria-selected', v === entityViewMode ? 'true' : 'false');
     });
-  });
+  }
+  if (!isPdf && entityViewMode !== 'class') entityViewMode = 'class';
+
+  if (entityViewMode === 'outline' && page.pdfDocId) {
+    renderOutlineView(body, page);
+  } else if (entityViewMode === 'page' && isPdf) {
+    renderEntitiesByPage(body, items);
+  } else {
+    renderEntitiesByClass(body, items);
+  }
 
   const total = stats.total ?? items.length;
   const elapsed = stats.elapsed_ms ? `${(stats.elapsed_ms/1000).toFixed(1)}s` : '?';
@@ -2015,9 +2022,152 @@ function renderEntitiesPanel() {
   const scopeLabel = entities.scope === 'document'
     ? `scope: whole document${entities.pdfPageCount ? ` (${entities.pdfPageCount} pages)` : ''}${entities.sourceTruncated ? ` · TRUNCATED at first ${(entities.sourceText?.length || 0).toLocaleString()} of ${(entities.sourceFullLength || 0).toLocaleString()} chars` : ''}`
     : 'scope: current page';
+  const byClassMap = items.reduce((a,e) => { (a[e.extraction_class] = a[e.extraction_class] || []).push(e); return a; }, {});
   setEntitiesStatus(
-    `${items.length}/${total} grounded · ${classes.length} classes · ${elapsed} · model ${stats.model_id || 'local Gemma'} · ${scopeLabel} · ${sourceLabel}`
+    `${items.length}/${(stats.total ?? items.length)} grounded · ${Object.keys(byClassMap).length} classes · ${elapsed} · model ${stats.model_id || 'local Gemma'} · ${scopeLabel} · ${sourceLabel}`
   );
+}
+
+// ---- Entity view renderers ----
+
+function renderEntityCardHtml(items, e) {
+  const globalIdx = items.indexOf(e);
+  const pageNum = e.attributes?.page;
+  const attrs = Object.entries(e.attributes || {})
+    .filter(([k]) => k !== 'page')
+    .map(([k,v]) => `<span class="attr"><span class="attr-key">${escapeHtml(k)}</span>:${escapeHtml(String(v))}</span>`)
+    .join('');
+  const ci = e.char_interval || {};
+  const meta = (ci.start_pos !== undefined ? `${ci.start_pos}–${ci.end_pos}` : '');
+  const pageBadge = pageNum
+    ? `<span class="entity-page" title="Click card to jump to page ${pageNum}">${escapeHtml(String(pageNum))}</span>`
+    : '';
+  return `
+    <div class="entity-card" data-entity-index="${globalIdx}" data-class="${e.extraction_class}" ${pageNum ? `data-page="${pageNum}"` : ''}>
+      <div class="entity-text">${pageBadge}${escapeHtml(e.extraction_text)}</div>
+      ${attrs ? `<div class="entity-attrs">${attrs}</div>` : ''}
+      ${meta ? `<div class="entity-meta">${meta}</div>` : ''}
+    </div>`;
+}
+
+function renderEntitiesByClass(body, items) {
+  const byClass = items.reduce((acc, e) => { (acc[e.extraction_class] = acc[e.extraction_class] || []).push(e); return acc; }, {});
+  const orderedClasses = ['component','flow_step','concept','text_label','caption','data_point','cta'];
+  const classes = Object.keys(byClass).sort((a,b) => orderedClasses.indexOf(a) - orderedClasses.indexOf(b));
+  const summaryChips = classes.map(cls =>
+    `<button type="button" class="summary-chip ent-${cls}" data-class="${cls}" style="border-left: 3px solid var(--ent-color)">${entityClassLabel(cls)} · ${byClass[cls].length}</button>`
+  ).join('');
+  const sectionsHtml = classes.map(cls => {
+    const cards = byClass[cls].map(e => renderEntityCardHtml(items, e)).join('');
+    return `<section class="entities-class-section ent-${cls}">
+      <h3>${entityClassLabel(cls)}<span class="class-count">· ${byClass[cls].length}</span></h3>
+      ${cards || '<div class="entities-empty" style="padding:8px;text-align:left">none</div>'}
+    </section>`;
+  }).join('');
+
+  body.innerHTML = `
+    ${summaryChips ? `<div class="entities-summary">${summaryChips}</div>` : ''}
+    ${sectionsHtml || '<div class="entities-empty">No grounded extractions returned.</div>'}
+  `;
+  body.querySelectorAll('.entity-card').forEach(card => card.addEventListener('click', () => focusEntity(Number(card.dataset.entityIndex))));
+  body.querySelectorAll('.summary-chip').forEach(chip => chip.addEventListener('click', () => {
+    const cls = chip.dataset.class;
+    const target = body.querySelector(`.entities-class-section.ent-${cls}`);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    body.querySelectorAll('.summary-chip').forEach(c => c.classList.toggle('active', c === chip));
+  }));
+}
+
+function renderEntitiesByPage(body, items) {
+  // Bucket entities by their attributes.page; entities without a page go in
+  // an "Unattributed" bucket at the end so the user sees what fell through.
+  const buckets = new Map();
+  for (const e of items) {
+    const p = e.attributes?.page;
+    const key = (typeof p === 'number') ? p : null;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(e);
+  }
+  const sortedPages = [...buckets.keys()].filter(k => k !== null).sort((a,b) => a - b);
+  const sections = [];
+  for (const p of sortedPages) {
+    const cards = buckets.get(p).map(e => renderEntityCardHtml(items, e)).join('');
+    sections.push(`<section class="entities-page-section" data-page="${p}">
+      <h3 data-jump="${p}" title="Jump to page ${p}">Page ${p}<span class="page-count">· ${buckets.get(p).length}</span></h3>
+      ${cards}
+    </section>`);
+  }
+  if (buckets.has(null)) {
+    const cards = buckets.get(null).map(e => renderEntityCardHtml(items, e)).join('');
+    sections.push(`<section class="entities-page-section" style="border-left-color:#d6cfc7">
+      <h3>Unattributed<span class="page-count">· ${buckets.get(null).length}</span></h3>
+      ${cards}
+    </section>`);
+  }
+  body.innerHTML = sections.join('') || '<div class="entities-empty">No page-attributed extractions.</div>';
+  body.querySelectorAll('.entity-card').forEach(card => card.addEventListener('click', () => focusEntity(Number(card.dataset.entityIndex))));
+  body.querySelectorAll('h3[data-jump]').forEach(h => h.addEventListener('click', () => jumpToPdfPage(Number(h.dataset.jump))));
+}
+
+async function renderOutlineView(body, page) {
+  const cached = outlineCache[page.pdfDocId];
+  if (!cached) {
+    body.innerHTML = `<div class="entities-empty"><span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid #ddd;border-top-color:#a23b31;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:8px"></span>Building outline from docling Markdown…</div>`;
+    try {
+      const res = await fetch(`/api/outline/${page.pdfDocId}`);
+      const data = await res.json();
+      if (!res.ok || !data.outline) {
+        body.innerHTML = `<div class="entities-empty">Outline failed: ${escapeHtml(data.error || 'HTTP ' + res.status)}</div>`;
+        return;
+      }
+      outlineCache[page.pdfDocId] = data.outline;
+    } catch (err) {
+      body.innerHTML = `<div class="entities-empty">Outline fetch threw: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+  }
+  const outline = outlineCache[page.pdfDocId];
+  const items = outline.items || [];
+  const pageList = outline.pages || [];
+  const headingsHtml = items.length
+    ? `<div class="outline-list">${items.map(it => {
+        const pageBadge = it.page
+          ? `<span class="page-badge">p.${it.page}</span>`
+          : `<span class="page-badge unmapped">—</span>`;
+        const cls = `outline-item lvl-${it.level} ${it.page ? '' : 'no-page'}`;
+        return `<div class="${cls}" ${it.page ? `data-page="${it.page}"` : ''}>
+          ${pageBadge}<span class="outline-text">${escapeHtml(it.text)}</span>
+        </div>`;
+      }).join('')}</div>`
+    : `<div class="entities-empty" style="padding:14px;text-align:left;color:#8a8378">No headings found in the docling Markdown for this document. The "Pages" list below provides per-page navigation.</div>`;
+
+  const pagesHtml = `<section class="outline-pages-section">
+    <h3>Pages</h3>
+    <div class="outline-list">${pageList.map(p =>
+      `<div class="outline-item lvl-2" data-page="${p.page}">
+        <span class="page-badge">p.${p.page}</span>
+        <span class="outline-text">${escapeHtml(p.firstLine || `Page ${p.page}`)}</span>
+      </div>`
+    ).join('')}</div>
+  </section>`;
+
+  body.innerHTML = headingsHtml + pagesHtml;
+  body.querySelectorAll('.outline-item[data-page]').forEach(el => {
+    el.addEventListener('click', () => jumpToPdfPage(Number(el.dataset.page)));
+  });
+}
+
+function jumpToPdfPage(pageNum) {
+  if (!Number.isFinite(pageNum)) return;
+  const cur = state.pages[state.currentIndex];
+  if (!cur?.pdfDocId) return;
+  const idx = state.pages.findIndex(p => p.pdfDocId === cur.pdfDocId && Number(p.pdfPageNumber) === pageNum);
+  if (idx < 0 || idx === state.currentIndex) return;
+  state.currentIndex = idx;
+  state.pendingClick = null;
+  renderCurrentPage();
+  updateUI();
+  saveSession();
 }
 
 function entitiesShowSpinner(message) {
@@ -2231,6 +2381,12 @@ $('galleryOverlay').addEventListener('click', () => closePanel('gallery'));
 $('entitiesBtn').addEventListener('click', openEntities);
 $('entitiesClose').addEventListener('click', () => closePanel('entities'));
 $('entitiesOverlay').addEventListener('click', () => closePanel('entities'));
+$('entitiesViewTabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('.ev-tab');
+  if (!tab || tab.disabled) return;
+  entityViewMode = tab.dataset.view;
+  renderEntitiesPanel();
+});
 $('entitiesRefreshBtn').addEventListener('click', () => {
   const page = state.pages[state.currentIndex];
   if (!page) return;
