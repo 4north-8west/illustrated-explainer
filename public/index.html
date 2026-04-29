@@ -1831,7 +1831,13 @@ async function openEntities() {
   document.body.classList.toggle('no-entity-highlights', !prefs.highlights);
   document.body.classList.toggle('show-entity-bboxes', prefs.bboxes);
 
-  // Try cache first
+  // Pull cached analysis from the server if we haven't loaded it this session.
+  // Without this the "Extract entities" button gates on learnCache, which is
+  // only populated when the Learn panel has been opened — even if the analysis
+  // JSON has been on disk since a prior session.
+  await ensureAnalysisLoaded(page.id);
+
+  // Try cached entities
   if (!entitiesCache[page.id]) {
     try {
       const res = await fetch(`/api/entities/${page.id}`);
@@ -1841,6 +1847,22 @@ async function openEntities() {
   }
   renderEntitiesPanel();
   refreshSourceHighlights();
+}
+
+async function ensureAnalysisLoaded(pageId) {
+  if (!pageId) return null;
+  if (learnCache[pageId] && (learnCache[pageId].description || learnCache[pageId].explanation)) {
+    return learnCache[pageId];
+  }
+  try {
+    const res = await fetch(`/api/analysis/${pageId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    learnCache[pageId] = data;
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 function setEntitiesStatus(text) {
