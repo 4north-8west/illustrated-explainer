@@ -78,29 +78,42 @@ def main() -> int:
         return 0
 
     prompt = (
-        "You are extracting structured entities from an automated analysis of an "
-        "image (educational diagram, infographic, informational flyer, math notes, "
-        "scientific process, historical map, or chart). Use VERBATIM spans from "
-        "the source text, in order of appearance, with no paraphrasing or overlap.\n\n"
+        "You are extracting structured entities from text that came from a "
+        "document, diagram, infographic, flyer, math notes, scientific process, "
+        "historical map, chart, accessibility policy, or similar source. The "
+        "text may be split into pages with `## Page N` markers — preserve the "
+        "verbatim wording of each extracted span and the order it appears. No "
+        "paraphrasing, no overlap, no inventing categories.\n\n"
+        "PRIORITY: prefer relevance and specificity over volume. A short list "
+        "of 5–15 concrete, distinctive entities per page beats a long list of "
+        "generic phrases. Skip filler like 'Today's Agenda' unless it carries "
+        "meaning. Do not extract pure formatting (bullets, page numbers, or "
+        "headings already covered by other items).\n\n"
         "Extraction classes:\n"
-        "  - component: a named labeled element / actor / box in the image (e.g. role "
-        "names in ALL CAPS, anchored objects, headings of major sections of a flyer). "
-        "Attribute: role (one of: actor, input, process, output, container, exclusion, "
-        "section).\n"
-        "  - flow_step: a numbered or named arrow / step describing a transition. "
+        "  - component: a named labeled element / actor / box in a diagram, or "
+        "a major section heading on a flyer or document page. Attribute: role "
+        "(one of: actor, input, process, output, container, exclusion, section).\n"
+        "  - flow_step: a numbered or named transition / step describing a flow. "
         "Attribute: step_number (string or empty).\n"
-        "  - concept: a high-level abstract idea introduced as a principle, concept, "
-        "or key term.\n"
-        "  - text_label: a verbatim string that appears as text inside the image "
-        "(folder names, file names, captions, signs, dates, contact info on flyers).\n"
-        "  - caption: explanatory caption text describing the whole image or a major "
-        "region.\n"
-        "  - data_point: a quantitative datum (value + label, axis tick, table cell) "
-        "that came from a chart or table.\n"
-        "  - cta: a call-to-action or actionable item on a flyer (e.g. 'Register at...', "
-        "'RSVP by 5/15', 'Email contact@...').\n\n"
-        "Provide concise meaningful attributes. Every extraction_text must be a "
-        "substring of the source. Skip categories that don't apply to the image."
+        "  - concept: a defined term, principle, named standard, or key technical "
+        "concept. For documents this is the workhorse class — definitions, "
+        "named regulations, framework terms (e.g. 'Tagged PDF', 'WCAG 2.1 "
+        "Level AA', 'Knowledge Loop'). Attribute: role (term, principle, "
+        "framework, standard, or empty).\n"
+        "  - text_label: a verbatim string that appears as visible text in an "
+        "image OR a specific datum on a document page that doesn't fit the "
+        "other classes (folder names, file names, dates, deadlines, contact "
+        "details, percentages, metrics). Attribute: context (date, deadline, "
+        "metric, location, contact, title, or empty).\n"
+        "  - caption: explanatory caption text describing the whole image or a "
+        "major region.\n"
+        "  - data_point: a quantitative datum (value + label, axis tick, table "
+        "cell) from a chart or table.\n"
+        "  - cta: an actionable obligation or requirement — 'must conform to', "
+        "'shall remediate', 'register at', 'RSVP by'. Attribute: obligation "
+        "(must, shall, should, may) or deadline (string).\n\n"
+        "Every extraction_text must be a contiguous verbatim substring of the "
+        "source. Skip categories that don't apply."
     )
 
     examples = [
@@ -191,6 +204,55 @@ def main() -> int:
                     extraction_class="cta",
                     extraction_text="RSVP at career.ucmerced.edu/fair by April 10.",
                     attributes={"deadline": "April 10"},
+                ),
+            ],
+        ),
+        # Document / policy example — multi-page, compliance prose. This is
+        # the shape the Illustrated Explainer most often sees from PDFs.
+        lx.data.ExampleData(
+            text=(
+                "## Page 1\n\n"
+                "Compliance Deadline: April 24, 2026\n\n"
+                "All university-managed digital content must conform to WCAG 2.1 "
+                "Level AA. This requirement applies to web pages, documents, "
+                "course materials, and video media.\n\n"
+                "## Page 2\n\n"
+                "Key Concepts\n\n"
+                "- Tagged PDF: a PDF with structural metadata that assistive "
+                "technology can navigate\n"
+                "- Alternative Text: a textual description of an image\n\n"
+                "Departments shall remediate existing content by the deadline."
+            ),
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="text_label",
+                    extraction_text="Compliance Deadline: April 24, 2026",
+                    attributes={"context": "deadline"},
+                ),
+                lx.data.Extraction(
+                    extraction_class="cta",
+                    extraction_text="must conform to WCAG 2.1 Level AA",
+                    attributes={"obligation": "must"},
+                ),
+                lx.data.Extraction(
+                    extraction_class="concept",
+                    extraction_text="WCAG 2.1 Level AA",
+                    attributes={"role": "standard"},
+                ),
+                lx.data.Extraction(
+                    extraction_class="concept",
+                    extraction_text="Tagged PDF",
+                    attributes={"role": "term"},
+                ),
+                lx.data.Extraction(
+                    extraction_class="concept",
+                    extraction_text="Alternative Text",
+                    attributes={"role": "term"},
+                ),
+                lx.data.Extraction(
+                    extraction_class="cta",
+                    extraction_text="Departments shall remediate existing content by the deadline.",
+                    attributes={"obligation": "shall"},
                 ),
             ],
         ),

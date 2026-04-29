@@ -2452,6 +2452,86 @@ function attributePagesToExtractions(extractions, pageOffsets) {
   return attributed;
 }
 
+// Parse docling Markdown headings (## H2 and ### H3) into a navigable TOC.
+// Maps each heading to a source PDF page by finding which per-page pdftotext
+// the heading text appears in. Cached at doc level so it's free on re-open.
+function buildPdfOutline(pdfDocId) {
+  const pages = [];
+  for (const [id, m] of Object.entries(pageMeta)) {
+    if (m.pdfDocId === pdfDocId) pages.push({ id, m });
+  }
+  if (!pages.length) return null;
+  pages.sort((a, b) => (a.m.pdfPageNumber || 0) - (b.m.pdfPageNumber || 0));
+
+  const sample = pages[0].m;
+  const docMdPath = path.join(GENERATED_DIR, sample.folder, `doc-${pdfDocId}.md`);
+  const haveDocling = fs.existsSync(docMdPath);
+
+  // Build per-page text map for heading → page lookup
+  const pageTexts = pages.map(({ id, m }) => ({
+    page: m.pdfPageNumber,
+    text: ((loadAnalysis(id)?.extracted?.text) || '').toLowerCase(),
+  }));
+
+  function findPageForHeading(headingText) {
+    const needle = headingText.toLowerCase().trim();
+    if (!needle) return null;
+    // Prefer a page whose text starts with the heading (most likely the heading source)
+    for (const p of pageTexts) {
+      const startsWith = p.text.trimStart().startsWith(needle);
+      if (startsWith) return p.page;
+    }
+    // Otherwise any page that contains it
+    for (const p of pageTexts) {
+      if (p.text.includes(needle)) return p.page;
+    }
+    return null;
+  }
+
+  const items = [];
+  if (haveDocling) {
+    const md = fs.readFileSync(docMdPath, 'utf8');
+    // Pull H1/H2/H3 (leading ##, ###; first H1 is rare in docling output)
+    const lines = md.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const m = line.match(/^(#{1,3})\s+(.+?)\s*$/);
+      if (!m) continue;
+      const level = m[1].length;
+      const text = m[2].replace(/\s+/g, ' ').trim();
+      if (!text || /^[\d\s.,-]+$/.test(text)) continue;  // skip number-only headings
+      items.push({ level, text, page: findPageForHeading(text) });
+    }
+  }
+
+  // Fallback: synthesize a flat per-page outline using each page's first
+  // non-empty line. Always useful as a "Pages" list even when docling is absent
+  // or produced a heading-poor document.
+  const pageList = pageTexts.map(p => {
+    const firstLine = (loadAnalysis(pages.find(x => x.m.pdfPageNumber === p.page).id)?.extracted?.text || '')
+      .split('\n').map(s => s.trim()).find(Boolean) || `Page ${p.page}`;
+    return { page: p.page, firstLine: firstLine.slice(0, 120) };
+  });
+
+  return { items, pages: pageList, sourceKind: haveDocling ? 'docling-headings' : 'pdftotext-firstline' };
+}
+
+app.get('/api/outline/:pdfDocId', (req, res) => {
+  const { pdfDocId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pdfDocId))) {
+    return res.status(400).json({ error: 'Invalid pdfDocId' });
+  }
+  const cached = loadDocAnalysis(pdfDocId);
+  if (cached?.outline) return res.json({ outline: cached.outline });
+  const outline = buildPdfOutline(pdfDocId);
+  if (!outline) return res.status(404).json({ error: 'Document not found or has no pages' });
+  // Persist for cheap re-fetch
+  const docData = cached || {};
+  docData.outline = { ...outline, generatedAt: new Date().toISOString() };
+  saveDocAnalysis(pdfDocId, docData);
+  res.json({ outline: docData.outline });
+});
+
 app.get('/api/entities/doc/:pdfDocId', (req, res) => {
   const { pdfDocId } = req.params;
   if (!(/^[a-f0-9]{16}$/.test(pdfDocId))) {
