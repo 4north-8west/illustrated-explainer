@@ -1235,6 +1235,33 @@ function detectPdfMetadata(pdfPath) {
   return { pages, tagged, title };
 }
 
+// docling whole-document extraction. Returns the Markdown string on success,
+// or null if docling is unavailable or fails. Used for high-quality structured
+// extraction (preserves headings/lists/tables) before we fall back to per-page
+// pdftotext concatenation.
+function extractPdfWithDocling(pdfPath, outDir) {
+  fs.mkdirSync(outDir, { recursive: true });
+  try {
+    execFileSync('docling', ['--to', 'md', '--output', outDir, pdfPath], {
+      timeout: 600000,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+  } catch (err) {
+    console.warn(`[docling] failed: ${err.message}`);
+    return null;
+  }
+  // docling writes <pdf-basename>.md alongside our outDir
+  const base = path.basename(pdfPath, path.extname(pdfPath));
+  const candidates = [
+    path.join(outDir, `${base}.md`),
+    ...fs.readdirSync(outDir).filter(f => f.endsWith('.md')).map(f => path.join(outDir, f)),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return fs.readFileSync(c, 'utf8');
+  }
+  return null;
+}
+
 function extractPdfPageText(pdfPath, pageNumber) {
   try {
     return execFileSync(
@@ -1447,6 +1474,26 @@ app.post('/api/upload-pdf', async (req, res) => {
   } catch (err) {
     console.error('[upload-pdf] render failed:', err.message);
     return res.status(500).json({ error: 'PDF render failed: ' + err.message });
+  }
+
+  // Run docling once over the whole PDF for high-quality structured Markdown
+  // (preserves headings, lists, tables) when at least one page has text. This
+  // is used by /api/entities/doc/:pdfDocId. If docling fails or is unavailable,
+  // the doc-level endpoint falls back to per-page pdftotext concatenation.
+  const anyTextBearing = pages.some(p => p.pdfHasText);
+  if (anyTextBearing) {
+    const doclingMdPath = path.join(folderPath, `doc-${pdfDocId}.md`);
+    if (!fs.existsSync(doclingMdPath)) {
+      console.log(`[upload-pdf] running docling on ${trimmedLabel} (${info.pages} pages)...`);
+      const startedDocling = Date.now();
+      const docText = extractPdfWithDocling(pdfPath, path.join(folderPath, `_docling-${pdfDocId}`));
+      if (docText) {
+        fs.writeFileSync(doclingMdPath, docText, 'utf8');
+        console.log(`[upload-pdf] docling produced ${docText.length} chars in ${Date.now() - startedDocling}ms`);
+      } else {
+        console.log('[upload-pdf] docling unavailable or failed; doc-level entities will fall back to pdftotext concat');
+      }
+    }
   }
 
   console.log(`[upload-pdf] done: ${pages.length} pages registered for doc ${pdfDocId}`);
@@ -2322,111 +2369,129 @@ app.post('/api/entities/:pageId', async (req, res) => {
     stats: result.stats,
     sourceText: text,
     sourceKind,
+    scope: 'page',
     generatedAt: new Date().toISOString(),
   };
   saveAnalysis(pageId, analysis);
 
   console.log(
     `[entities] ${result.stats.grounded || 0}/${result.stats.total || 0} grounded ` +
-    `in ${result.stats.elapsed_ms || '?'}ms (source: ${sourceKind})`
+    `in ${result.stats.elapsed_ms || '?'}ms (source: ${sourceKind}, scope: page)`
   );
   res.json({ entities: analysis.entities });
 });
 
-// --- Image-region bounding boxes (vision call) ---
-const BBOX_SYSTEM =
-  'You are a layout analyst. Identify labeled visible elements in an image and return strict JSON only.';
-const BBOX_PROMPT = `Identify the major labeled visible elements in this image — boxes, icons, arrows, headings, titles, captions, callouts. For each, return:
-- "label": the visible text/name as it appears (verbatim, no paraphrase)
-- "bbox": [x0, y0, x1, y1] in normalized 0.0–1.0 coordinates with origin at the top-left
+// --- Document-level entity extraction for PDFs ---
+// Whole-document langextract pass; cached at _analysis/pdf-<pdfDocId>.json so
+// every page of the PDF shares the same entity result set.
 
-Return strict JSON only:
-{"elements": [{"label": "...", "bbox": [x0, y0, x1, y1]}, ...]}
+const DOC_ANALYSIS_PREFIX = 'pdf-';
 
-Rules:
-- Only include elements that have clearly visible text labels.
-- Coordinates must be normalized 0.0–1.0 (do not return pixel coordinates).
-- Each bbox should tightly enclose the labeled element including its label text.
-- Maximum 30 elements; choose the most prominent labeled regions.
-- Do not invent labels not visible in the image.`;
-
-function parseBboxResponse(text) {
-  if (!text) return [];
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start < 0 || end <= start) return [];
-  let obj;
-  try {
-    obj = JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return [];
-  }
-  const elements = Array.isArray(obj.elements) ? obj.elements : [];
-  const cleaned = [];
-  for (const el of elements) {
-    if (!el || typeof el.label !== 'string') continue;
-    const label = el.label.trim();
-    if (!label) continue;
-    const bbox = Array.isArray(el.bbox) ? el.bbox.map(Number) : null;
-    if (!bbox || bbox.length !== 4) continue;
-    if (bbox.some(v => !Number.isFinite(v))) continue;
-    let [x0, y0, x1, y1] = bbox;
-    if (x1 < x0) [x0, x1] = [x1, x0];
-    if (y1 < y0) [y0, y1] = [y1, y0];
-    x0 = Math.max(0, Math.min(1, x0));
-    y0 = Math.max(0, Math.min(1, y0));
-    x1 = Math.max(0, Math.min(1, x1));
-    y1 = Math.max(0, Math.min(1, y1));
-    if (x1 - x0 < 0.005 || y1 - y0 < 0.005) continue;
-    cleaned.push({ label, bbox: [x0, y0, x1, y1] });
-  }
-  return cleaned.slice(0, 30);
+function loadDocAnalysis(pdfDocId) {
+  const docPath = path.join(ANALYSIS_DIR, `${DOC_ANALYSIS_PREFIX}${pdfDocId}.json`);
+  if (!fs.existsSync(docPath)) return null;
+  try { return JSON.parse(fs.readFileSync(docPath, 'utf8')); } catch { return null; }
+}
+function saveDocAnalysis(pdfDocId, data) {
+  fs.mkdirSync(ANALYSIS_DIR, { recursive: true });
+  const docPath = path.join(ANALYSIS_DIR, `${DOC_ANALYSIS_PREFIX}${pdfDocId}.json`);
+  fs.writeFileSync(docPath, JSON.stringify(data, null, 2));
 }
 
-app.get('/api/bboxes/:pageId', (req, res) => {
-  const { pageId } = req.params;
-  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
-    return res.status(400).json({ error: 'Invalid page ID' });
+function findPdfDocSourceText(pdfDocId) {
+  // Prefer the docling Markdown if it was produced at upload time. Otherwise
+  // concatenate per-page pdftotext output from each page's analysis.extracted
+  // field, with page markers so the model gets natural document structure.
+  const pages = [];
+  for (const [id, m] of Object.entries(pageMeta)) {
+    if (m.pdfDocId === pdfDocId) pages.push({ id, m });
   }
-  const cached = loadAnalysis(pageId);
-  if (cached && cached.bboxes) return res.json({ bboxes: cached.bboxes });
-  res.json({ bboxes: null });
+  if (!pages.length) return null;
+  pages.sort((a, b) => (a.m.pdfPageNumber || 0) - (b.m.pdfPageNumber || 0));
+
+  // First: docling Markdown
+  const sample = pages[0].m;
+  const docMdPath = path.join(GENERATED_DIR, sample.folder, `doc-${pdfDocId}.md`);
+  if (fs.existsSync(docMdPath)) {
+    return { text: fs.readFileSync(docMdPath, 'utf8'), source: 'pdf-doc-docling' };
+  }
+
+  // Fallback: concatenate per-page extracted text
+  const parts = [];
+  for (const { id, m } of pages) {
+    const a = loadAnalysis(id);
+    const t = (a?.extracted?.text || '').trim();
+    if (t) parts.push(`## Page ${m.pdfPageNumber}\n\n${t}\n`);
+  }
+  if (!parts.length) return null;
+  return { text: parts.join('\n'), source: 'pdf-doc-concat' };
+}
+
+app.get('/api/entities/doc/:pdfDocId', (req, res) => {
+  const { pdfDocId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pdfDocId))) {
+    return res.status(400).json({ error: 'Invalid pdfDocId' });
+  }
+  const cached = loadDocAnalysis(pdfDocId);
+  if (cached?.entities) return res.json({ entities: cached.entities });
+  res.json({ entities: null });
 });
 
-app.post('/api/bboxes/:pageId', async (req, res) => {
-  const { pageId } = req.params;
-  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
-    return res.status(400).json({ error: 'Invalid page ID' });
+app.post('/api/entities/doc/:pdfDocId', async (req, res) => {
+  const { pdfDocId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pdfDocId))) {
+    return res.status(400).json({ error: 'Invalid pdfDocId' });
   }
-  const meta = pageMeta[pageId];
-  if (!meta) return res.status(404).json({ error: 'Page not found in metadata' });
-  const imagePath = path.join(GENERATED_DIR, meta.folder, `${pageId}.png`);
-  if (!fs.existsSync(imagePath)) return res.status(404).json({ error: 'Image file not found' });
-
-  const analysis = loadAnalysis(pageId) || { description: null, explanation: null };
-
-  try {
-    const resized = await sharp(imagePath).resize({ width: 1024, withoutEnlargement: true }).png().toBuffer();
-    const imageBase64 = resized.toString('base64');
-    console.log(`[bboxes] Generating bounding boxes for ${pageId}...`);
-    const started = Date.now();
-    const result = await analyzeImage(imageBase64, BBOX_SYSTEM, BBOX_PROMPT);
-    const elements = parseBboxResponse(result.text);
-    const elapsedMs = Date.now() - started;
-    analysis.bboxes = {
-      elements,
-      generatedAt: new Date().toISOString(),
-      source: result.source,
-      elapsedMs,
-      raw: result.text.slice(0, 4000),
-    };
-    saveAnalysis(pageId, analysis);
-    console.log(`[bboxes] ${elements.length} elements in ${elapsedMs}ms via ${result.source}`);
-    res.json({ bboxes: analysis.bboxes });
-  } catch (err) {
-    console.error(`[bboxes] failed: ${err.message}`);
-    res.status(502).json({ error: `Bounding box generation failed: ${err.message}` });
+  // Verify the doc exists
+  const anyPage = Object.entries(pageMeta).find(([_id, m]) => m.pdfDocId === pdfDocId);
+  if (!anyPage) {
+    return res.status(404).json({ error: 'PDF document not found' });
   }
+  const pdfPageCount = anyPage[1].pdfPageCount || null;
+
+  const sourceObj = findPdfDocSourceText(pdfDocId);
+  if (!sourceObj) {
+    return res.status(400).json({
+      error: 'No extractable text in this PDF — entities only run on text-bearing PDFs. Run Learn on individual pages to use the per-page vision-derived path.',
+    });
+  }
+
+  // Cap the doc-level source to keep extraction tractable on local hardware.
+  // 30_000 chars ≈ 12 chunks at 2_500 chars/chunk on the small Gemma-4-E4B
+  // running with -np 8 (4096 token slots). Each chunk takes ~10–20s on the
+  // small model, so a typical run completes in 2–5 minutes. PDFs longer than
+  // this are truncated at character count; the UI surfaces the cap.
+  const DOC_SOURCE_CAP = 30_000;
+  const fullLen = sourceObj.text.length;
+  const truncated = fullLen > DOC_SOURCE_CAP;
+  const inputText = truncated ? sourceObj.text.slice(0, DOC_SOURCE_CAP) : sourceObj.text;
+  console.log(`[entities-doc] ${pdfDocId}: running langextract on ${inputText.length}/${fullLen} chars (${sourceObj.source}${truncated ? '; TRUNCATED' : ''})...`);
+
+  const result = await runLangextractHelper(inputText, {
+    // 2_500 chars per chunk leaves headroom for the few-shot examples + prompt
+    // scaffolding inside the small model's per-slot 4096-token budget.
+    maxCharBuffer: 2_500,
+    timeoutMs: 1_500_000, // 25 min
+  });
+  if (result.error) {
+    console.error(`[entities-doc] ${result.error}`);
+    return res.status(502).json({ error: result.error });
+  }
+  const docData = loadDocAnalysis(pdfDocId) || {};
+  docData.entities = {
+    extractions: result.extractions,
+    stats: result.stats,
+    sourceText: inputText,
+    sourceFullLength: fullLen,
+    sourceTruncated: truncated,
+    sourceKind: sourceObj.source,
+    scope: 'document',
+    pdfPageCount,
+    generatedAt: new Date().toISOString(),
+  };
+  saveDocAnalysis(pdfDocId, docData);
+  console.log(`[entities-doc] ${result.stats.grounded || 0}/${result.stats.total || 0} grounded in ${result.stats.elapsed_ms || '?'}ms (${sourceObj.source})`);
+  res.json({ entities: docData.entities });
 });
 
 // --- Gallery API ---

@@ -252,8 +252,6 @@
   .entities-header { padding: 12px 16px; border-bottom: 1px solid #e8e4df; background: #fff; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .entities-header h2 { font-size: 15px; font-weight: 600; color: #444; margin: 0; }
   .entities-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .entities-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #555; cursor: pointer; user-select: none; }
-  .entities-toggle input { margin: 0; }
   .entities-refresh { padding: 4px 12px; font-size: 12px; }
   .entities-status { padding: 8px 16px; font-size: 11px; color: #8a8378; background: #f5f1ec; border-bottom: 1px solid #ece6de; min-height: 16px; font-family: "SF Mono", ui-monospace, monospace; }
   .entities-body { flex: 1; overflow-y: auto; padding: 14px 16px 22px; }
@@ -284,17 +282,6 @@
   .ent-caption    { --ent-color: #5a7d6a; }
   .ent-data_point { --ent-color: #8b5a3a; }
   .ent-cta        { --ent-color: #ad3b85; }
-  /* Source-pane highlights driven by entitiesHighlightToggle */
-  .source-content mark.entity-highlight { background: rgba(162,59,49,0.14); color: inherit; padding: 0 2px; border-radius: 2px; cursor: pointer; transition: background 0.12s; }
-  .source-content mark.entity-highlight:hover { background: rgba(162,59,49,0.32); }
-  .source-content mark.entity-highlight.active { background: rgba(162,59,49,0.45); outline: 1px solid #a23b31; }
-  body.no-entity-highlights .source-content mark.entity-highlight { background: transparent; outline: none; }
-  /* Bounding-box overlay (image regions) — placeholder layer; hidden until we wire image-region bboxes */
-  .image-container .entity-bbox-layer { position: absolute; inset: 0; pointer-events: none; display: none; }
-  body.show-entity-bboxes .image-container .entity-bbox-layer { display: block; }
-  .entity-bbox { position: absolute; border: 2px solid #a23b31; background: rgba(162,59,49,0.08); border-radius: 3px; pointer-events: auto; cursor: pointer; }
-  .entity-bbox.active { background: rgba(162,59,49,0.22); border-width: 3px; }
-  .entity-bbox-label { position: absolute; top: -22px; left: 0; background: #a23b31; color: #fff; padding: 2px 7px; font-size: 11px; border-radius: 3px; white-space: nowrap; font-family: "SF Mono", ui-monospace, monospace; }
 </style>
 <script>
   window.MathJax = {
@@ -376,14 +363,6 @@
   <div class="entities-header">
     <h2 id="entitiesPanelTitle">Structured Entities</h2>
     <div class="entities-controls">
-      <label class="entities-toggle" title="Highlight grounded source spans in the left source pane">
-        <input type="checkbox" id="entitiesHighlightToggle" checked>
-        <span>Show source highlights</span>
-      </label>
-      <label class="entities-toggle" title="When image-region bounding boxes are available, overlay them on the source image">
-        <input type="checkbox" id="entitiesBboxToggle">
-        <span>Show bounding boxes</span>
-      </label>
       <button class="btn entities-refresh" id="entitiesRefreshBtn" title="Re-run langextract on the current analysis text">Refresh</button>
       <button class="panel-close" id="entitiesClose" aria-label="Close entities panel">&times;</button>
     </div>
@@ -1374,7 +1353,6 @@ function renderCurrentPage() {
     canvas.appendChild(container);
   }
   // Re-apply entity highlights if the entities panel is open and we have entities for this page
-  if (typeof refreshSourceHighlights === 'function') refreshSourceHighlights();
 }
 
 // --- Generation ---
@@ -1841,8 +1819,6 @@ function closePanel(name) {
   $(name + 'Overlay').classList.remove('visible');
   $(name + 'Panel').classList.remove('visible');
   if (name === 'entities') {
-    document.body.classList.remove('show-entity-bboxes');
-    refreshSourceHighlights();  // strip marks when panel closes
   }
 }
 
@@ -1850,15 +1826,6 @@ function closePanel(name) {
 const entitiesCache = {};      // pageId → entities payload
 let entitiesLoadingId = null;
 let activeEntityIndex = -1;
-
-const ENTITIES_PREFS_KEY = 'illustratedExplainer.entitiesPrefs';
-function readEntitiesPrefs() {
-  try { return Object.assign({ highlights: true, bboxes: false }, JSON.parse(localStorage.getItem(ENTITIES_PREFS_KEY) || '{}')); }
-  catch { return { highlights: true, bboxes: false }; }
-}
-function writeEntitiesPrefs(prefs) {
-  try { localStorage.setItem(ENTITIES_PREFS_KEY, JSON.stringify(prefs)); } catch {}
-}
 
 function entityClassLabel(cls) {
   return ({
@@ -1872,41 +1839,34 @@ function entityClassLabel(cls) {
   })[cls] || cls;
 }
 
+// For PDF pages we operate at document scope; the cache key is the pdfDocId.
+// For non-PDF pages we keep per-page scope; cache key is the pageId.
+function entitiesCacheKey(page) {
+  if (!page) return null;
+  return page.pdfDocId ? `doc-${page.pdfDocId}` : page.id;
+}
+
 async function openEntities() {
   const page = state.pages[state.currentIndex];
   if (!page) return;
   $('entitiesOverlay').classList.add('visible');
   $('entitiesPanel').classList.add('visible');
 
-  // Apply persisted toggle prefs
-  const prefs = readEntitiesPrefs();
-  $('entitiesHighlightToggle').checked = prefs.highlights;
-  $('entitiesBboxToggle').checked = prefs.bboxes;
-  document.body.classList.toggle('no-entity-highlights', !prefs.highlights);
-  document.body.classList.toggle('show-entity-bboxes', prefs.bboxes);
-
   // Pull cached analysis from the server if we haven't loaded it this session.
-  // Without this the "Extract entities" button gates on learnCache, which is
-  // only populated when the Learn panel has been opened — even if the analysis
-  // JSON has been on disk since a prior session.
   await ensureAnalysisLoaded(page.id);
 
-  // Try cached entities
-  if (!entitiesCache[page.id]) {
+  const key = entitiesCacheKey(page);
+  if (!entitiesCache[key]) {
     try {
-      const res = await fetch(`/api/entities/${page.id}`);
+      const url = page.pdfDocId
+        ? `/api/entities/doc/${page.pdfDocId}`
+        : `/api/entities/${page.id}`;
+      const res = await fetch(url);
       const data = await res.json();
-      if (data && data.entities) entitiesCache[page.id] = data.entities;
+      if (data && data.entities) entitiesCache[key] = data.entities;
     } catch { /* ignore */ }
   }
   renderEntitiesPanel();
-  refreshSourceHighlights();
-
-  // If user has bbox toggle on, lazily load (or generate) bboxes too
-  if (document.body.classList.contains('show-entity-bboxes')) {
-    await ensureBboxesLoaded(page.id);
-    renderBboxLayer(page.id);
-  }
 }
 
 async function ensureAnalysisLoaded(pageId) {
@@ -1939,39 +1899,51 @@ function renderEntitiesPanel() {
     return;
   }
 
-  if (entitiesLoadingId === page.id) {
-    body.innerHTML = `<div class="entities-empty"><span class="spinner" style="display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#a23b31;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:8px"></span>Running langextract on the analysis text…</div>`;
-    setEntitiesStatus('Working — local Gemma · this typically takes 30–90s on first run');
+  const cacheKey = entitiesCacheKey(page);
+  if (entitiesLoadingId === cacheKey) {
+    body.innerHTML = `<div class="entities-empty"><span class="spinner" style="display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#a23b31;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:8px"></span>Running langextract on the source text…</div>`;
+    setEntitiesStatus(page.pdfDocId
+      ? `Working — extracting entities for the entire PDF document (${page.pdfPageCount || '?'} pages)…`
+      : 'Working — local Gemma · this typically takes 30–90s on first run'
+    );
     return;
   }
 
-  const entities = entitiesCache[page.id];
+  const entities = entitiesCache[cacheKey];
 
   if (!entities) {
     const haveAnalysis = Boolean(learnCache[page.id]?.description || learnCache[page.id]?.explanation);
-    const buttonLabel = haveAnalysis ? 'Extract entities' : 'Generate analysis &amp; extract entities';
-    const helperText = haveAnalysis
-      ? 'No structured entities yet for this page.'
-      : 'No analysis cached yet — clicking the button below will run the description + explanation analysis first, then extract entities. This typically takes 1–3 minutes total on local Gemma.';
+    const isPdf = Boolean(page.pdfDocId);
+    let buttonLabel, helperText, statusText;
+    if (isPdf) {
+      buttonLabel = `Extract entities (whole document, ${page.pdfPageCount || '?'} pages)`;
+      helperText = `No structured entities yet for this PDF document. Clicking the button runs langextract once over the full document text (extracted via docling or pdftotext). Typically 30–120s on local Gemma depending on document size.`;
+      statusText = `Idle — click to extract entities across all ${page.pdfPageCount || '?'} pages`;
+    } else if (haveAnalysis) {
+      buttonLabel = 'Extract entities';
+      helperText = 'No structured entities yet for this page.';
+      statusText = 'Idle — click "Extract entities" to run langextract on the cached analysis';
+    } else {
+      buttonLabel = 'Generate analysis & extract entities';
+      helperText = 'No analysis cached yet — clicking the button below will run the description + explanation analysis first, then extract entities. This typically takes 1–3 minutes total on local Gemma.';
+      statusText = 'Idle — analysis will run first, then entity extraction';
+    }
     body.innerHTML = `
       <div class="entities-empty">
         <div>${helperText}</div>
-        <button id="entitiesGenerateBtn" type="button">${buttonLabel}</button>
+        <button id="entitiesGenerateBtn" type="button">${escapeHtml(buttonLabel)}</button>
       </div>`;
     const startBtn = $('entitiesGenerateBtn');
     if (startBtn) {
       startBtn.addEventListener('click', (event) => {
-        console.log('[entities] Extract button clicked', { pageId: page.id });
+        console.log('[entities] Extract button clicked', { pageId: page.id, pdfDocId: page.pdfDocId });
         event.preventDefault();
-        runEntitiesExtraction(page.id);
+        runEntitiesExtraction(page);
       });
     } else {
       console.warn('[entities] Extract button could not be found after innerHTML write');
     }
-    setEntitiesStatus(haveAnalysis
-      ? 'Idle — click "Extract entities" to run langextract on the cached analysis'
-      : 'Idle — analysis will run first, then entity extraction'
-    );
+    setEntitiesStatus(statusText);
     return;
   }
 
@@ -2012,7 +1984,6 @@ function renderEntitiesPanel() {
   `;
 
   body.querySelectorAll('.entity-card').forEach(card => {
-    card.addEventListener('mouseenter', () => previewEntity(Number(card.dataset.entityIndex)));
     card.addEventListener('click', () => focusEntity(Number(card.dataset.entityIndex)));
   });
   body.querySelectorAll('.summary-chip').forEach(chip => {
@@ -2026,14 +1997,18 @@ function renderEntitiesPanel() {
 
   const total = stats.total ?? items.length;
   const elapsed = stats.elapsed_ms ? `${(stats.elapsed_ms/1000).toFixed(1)}s` : '?';
-  const sourceLabel = entities.sourceKind === 'pdf-extracted'
-    ? 'source: PDF text extraction (pdftotext)'
-    : entities.sourceKind === 'vision-analysis'
-      ? 'source: vision-derived analysis'
-      : 'source: ' + (entities.sourceKind || 'unknown');
-  const bboxNote = ' · click "Show bounding boxes" to generate image-region overlays';
+  const sourceMap = {
+    'pdf-doc-docling': 'source: docling whole-document extraction',
+    'pdf-doc-concat': 'source: pdftotext (concatenated pages)',
+    'pdf-extracted': 'source: pdftotext (single page)',
+    'vision-analysis': 'source: vision-derived analysis',
+  };
+  const sourceLabel = sourceMap[entities.sourceKind] || ('source: ' + (entities.sourceKind || 'unknown'));
+  const scopeLabel = entities.scope === 'document'
+    ? `scope: whole document${entities.pdfPageCount ? ` (${entities.pdfPageCount} pages)` : ''}${entities.sourceTruncated ? ` · TRUNCATED at first ${(entities.sourceText?.length || 0).toLocaleString()} of ${(entities.sourceFullLength || 0).toLocaleString()} chars` : ''}`
+    : 'scope: current page';
   setEntitiesStatus(
-    `${items.length}/${total} grounded · ${classes.length} classes · ${elapsed} · model ${stats.model_id || 'local Gemma'} · ${sourceLabel}${bboxNote}`
+    `${items.length}/${total} grounded · ${classes.length} classes · ${elapsed} · model ${stats.model_id || 'local Gemma'} · ${scopeLabel} · ${sourceLabel}`
   );
 }
 
@@ -2046,283 +2021,122 @@ function entitiesShowSpinner(message) {
     </div>`;
 }
 
-function entitiesShowError(messageHtml, pageId) {
+function entitiesShowError(messageHtml, page) {
   const body = $('entitiesBody');
   if (!body) return;
   body.innerHTML = `<div class="entities-empty"><div style="color:#a23b31;text-align:left;background:#fff7f5;border:1px solid #ead0cc;padding:10px 12px;border-radius:6px;margin-bottom:12px">${messageHtml}</div><button id="entitiesGenerateBtn" type="button">Try again</button></div>`;
   const btn = $('entitiesGenerateBtn');
-  if (btn) btn.addEventListener('click', () => runEntitiesExtraction(pageId));
+  if (btn) btn.addEventListener('click', () => runEntitiesExtraction(page));
 }
 
-async function runEntitiesExtraction(pageId) {
-  console.log('[entities] runEntitiesExtraction', { pageId, alreadyLoading: entitiesLoadingId });
+async function runEntitiesExtraction(pageOrId) {
+  // Accept either a page object or a pageId string for backward compat.
+  const page = (typeof pageOrId === 'string')
+    ? state.pages.find(p => p.id === pageOrId) || state.pages[state.currentIndex]
+    : pageOrId;
+  if (!page) return;
+  const isPdf = Boolean(page.pdfDocId);
+  const cacheKey = entitiesCacheKey(page);
+
+  console.log('[entities] runEntitiesExtraction', { pageId: page.id, pdfDocId: page.pdfDocId, cacheKey, alreadyLoading: entitiesLoadingId });
   if (entitiesLoadingId) {
     console.log('[entities] another extraction in flight; ignoring click');
     return;
   }
-  entitiesLoadingId = pageId;
-  // Force visible feedback BEFORE awaiting anything, in case any later step
-  // throws synchronously or yields very quickly with an error.
-  entitiesShowSpinner('Preparing…');
+  entitiesLoadingId = cacheKey;
+  entitiesShowSpinner(isPdf
+    ? `Extracting entities for the entire PDF document (${page.pdfPageCount || '?'} pages)…`
+    : 'Preparing…'
+  );
   setEntitiesStatus('Working — preparing request');
 
   try {
-    const cachedAnalysis = learnCache[pageId];
-    const haveAnalysis = Boolean(cachedAnalysis?.description || cachedAnalysis?.explanation);
-    console.log('[entities] step 1: haveAnalysis=', haveAnalysis);
-
-    if (!haveAnalysis) {
-      entitiesShowSpinner('Running analysis (description + explanation) — 30–90s on local Gemma…');
-      setEntitiesStatus('Running analysis (description + explanation)…');
-      let aData;
+    if (isPdf) {
+      // Doc-level path: server already has docling/pdftotext text from upload.
+      // Single POST does the work.
+      let data;
       try {
-        const aRes = await fetch(`/api/analysis/${pageId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'both' }),
-        });
-        console.log('[entities] /api/analysis status', aRes.status);
-        aData = await aRes.json().catch(() => ({}));
-        if (!aRes.ok || (!aData.description && !aData.explanation)) {
-          entitiesShowError(`Analysis step failed (HTTP ${aRes.status}). ${escapeHtml(aData.error || '')}`, pageId);
-          setEntitiesStatus('Failed during analysis step');
+        const res = await fetch(`/api/entities/doc/${page.pdfDocId}`, { method: 'POST' });
+        console.log('[entities] /api/entities/doc status', res.status);
+        data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.entities) {
+          entitiesShowError(`Document entity extraction failed (HTTP ${res.status}). ${escapeHtml(data.error || '')}`, page);
+          setEntitiesStatus('Failed during document extraction');
           return;
         }
-        learnCache[pageId] = aData;
       } catch (err) {
-        console.error('[entities] analysis fetch threw', err);
-        entitiesShowError(`Analysis fetch threw: ${escapeHtml(err.message)}`, pageId);
-        setEntitiesStatus('Network error during analysis');
+        console.error('[entities] doc entities fetch threw', err);
+        entitiesShowError(`Entities fetch threw: ${escapeHtml(err.message)}`, page);
+        setEntitiesStatus('Network error during document extraction');
         return;
       }
-    }
-
-    // Step 2: extract entities
-    entitiesShowSpinner('Extracting entities via langextract — 30–90s on local Gemma…');
-    setEntitiesStatus('Extracting entities via langextract…');
-    let data;
-    try {
-      const res = await fetch(`/api/entities/${pageId}`, { method: 'POST' });
-      console.log('[entities] /api/entities status', res.status);
-      data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.entities) {
-        entitiesShowError(`Entity extraction failed (HTTP ${res.status}). ${escapeHtml(data.error || '')}`, pageId);
-        setEntitiesStatus('Failed during extraction step');
+      entitiesCache[cacheKey] = data.entities;
+    } else {
+      // Per-page path: ensure analysis exists, then extract.
+      const cachedAnalysis = learnCache[page.id];
+      const haveAnalysis = Boolean(cachedAnalysis?.description || cachedAnalysis?.explanation);
+      if (!haveAnalysis) {
+        entitiesShowSpinner('Running analysis (description + explanation) — 30–90s on local Gemma…');
+        setEntitiesStatus('Running analysis (description + explanation)…');
+        try {
+          const aRes = await fetch(`/api/analysis/${page.id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'both' }),
+          });
+          const aData = await aRes.json().catch(() => ({}));
+          if (!aRes.ok || (!aData.description && !aData.explanation)) {
+            entitiesShowError(`Analysis step failed (HTTP ${aRes.status}). ${escapeHtml(aData.error || '')}`, page);
+            setEntitiesStatus('Failed during analysis step');
+            return;
+          }
+          learnCache[page.id] = aData;
+        } catch (err) {
+          console.error('[entities] analysis fetch threw', err);
+          entitiesShowError(`Analysis fetch threw: ${escapeHtml(err.message)}`, page);
+          setEntitiesStatus('Network error during analysis');
+          return;
+        }
+      }
+      entitiesShowSpinner('Extracting entities via langextract — 30–90s on local Gemma…');
+      setEntitiesStatus('Extracting entities via langextract…');
+      let data;
+      try {
+        const res = await fetch(`/api/entities/${page.id}`, { method: 'POST' });
+        data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.entities) {
+          entitiesShowError(`Entity extraction failed (HTTP ${res.status}). ${escapeHtml(data.error || '')}`, page);
+          setEntitiesStatus('Failed during extraction step');
+          return;
+        }
+      } catch (err) {
+        console.error('[entities] entities fetch threw', err);
+        entitiesShowError(`Entities fetch threw: ${escapeHtml(err.message)}`, page);
+        setEntitiesStatus('Network error during extraction');
         return;
       }
-    } catch (err) {
-      console.error('[entities] entities fetch threw', err);
-      entitiesShowError(`Entities fetch threw: ${escapeHtml(err.message)}`, pageId);
-      setEntitiesStatus('Network error during extraction');
-      return;
+      entitiesCache[cacheKey] = data.entities;
     }
-
-    entitiesCache[pageId] = data.entities;
-    console.log('[entities] cached', data.entities.extractions?.length, 'extractions');
   } catch (err) {
     console.error('[entities] unexpected error', err);
-    entitiesShowError(`Unexpected error: ${escapeHtml(err.message || String(err))}`, pageId);
+    entitiesShowError(`Unexpected error: ${escapeHtml(err.message || String(err))}`, page);
     setEntitiesStatus('Error: ' + (err.message || err));
   } finally {
     entitiesLoadingId = null;
   }
 
-  if (state.pages[state.currentIndex]?.id === pageId) {
+  // Re-render only if the user is still on a page sharing this scope
+  const stillOn = state.pages[state.currentIndex];
+  if (stillOn && entitiesCacheKey(stillOn) === cacheKey) {
     renderEntitiesPanel();
-    refreshSourceHighlights();
-    if (document.body.classList.contains('show-entity-bboxes')) {
-      ensureBboxesLoaded(pageId).then(() => renderBboxLayer(pageId));
-    }
   }
-}
-
-// --- Image-region bounding boxes ---
-const bboxesCache = {};       // pageId -> {elements:[{label,bbox}],…}
-const _bboxesLoadingIds = new Set();
-
-async function ensureBboxesLoaded(pageId, { force = false } = {}) {
-  if (!pageId) return null;
-  if (!force && bboxesCache[pageId]) return bboxesCache[pageId];
-  if (_bboxesLoadingIds.has(pageId)) return null;
-  _bboxesLoadingIds.add(pageId);
-  try {
-    if (!force) {
-      const cachedRes = await fetch(`/api/bboxes/${pageId}`);
-      if (cachedRes.ok) {
-        const j = await cachedRes.json();
-        if (j.bboxes) {
-          bboxesCache[pageId] = j.bboxes;
-          return j.bboxes;
-        }
-      }
-    }
-    setEntitiesStatus('Generating image-region bounding boxes (vision call, ~30–90s)…');
-    const res = await fetch(`/api/bboxes/${pageId}`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok || !data.bboxes) {
-      setEntitiesStatus('Bounding-box generation failed: ' + (data.error || ('HTTP ' + res.status)));
-      return null;
-    }
-    bboxesCache[pageId] = data.bboxes;
-    return data.bboxes;
-  } finally {
-    _bboxesLoadingIds.delete(pageId);
-  }
-}
-
-function bboxLabelMatchesEntity(label, entityText) {
-  if (!label || !entityText) return false;
-  const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
-  const a = norm(label);
-  const b = norm(entityText);
-  return a === b || a.includes(b) || b.includes(a);
-}
-
-function renderBboxLayer(pageId) {
-  // Find or create the overlay layer inside the current image-container
-  const container = document.querySelector('.canvas-area .image-container, .canvas-area .source-center .image-container');
-  if (!container) return;
-  let layer = container.querySelector('.entity-bbox-layer');
-  if (!layer) {
-    layer = document.createElement('div');
-    layer.className = 'entity-bbox-layer';
-    container.appendChild(layer);
-  }
-  layer.innerHTML = '';
-  const bboxes = bboxesCache[pageId];
-  if (!bboxes || !Array.isArray(bboxes.elements) || !bboxes.elements.length) return;
-  const img = container.querySelector('img');
-  if (!img) return;
-
-  const entities = entitiesCache[pageId];
-  const entityList = entities?.extractions || [];
-
-  const place = () => {
-    const ir = img.getBoundingClientRect();
-    const cr = container.getBoundingClientRect();
-    layer.style.left = `${ir.left - cr.left}px`;
-    layer.style.top = `${ir.top - cr.top}px`;
-    layer.style.width = `${ir.width}px`;
-    layer.style.height = `${ir.height}px`;
-    layer.querySelectorAll('.entity-bbox').forEach(el => {
-      const [x0, y0, x1, y1] = el.dataset.bbox.split(',').map(Number);
-      el.style.left = `${x0 * 100}%`;
-      el.style.top = `${y0 * 100}%`;
-      el.style.width = `${(x1 - x0) * 100}%`;
-      el.style.height = `${(y1 - y0) * 100}%`;
-    });
-  };
-
-  for (const el of bboxes.elements) {
-    const node = document.createElement('div');
-    node.className = 'entity-bbox';
-    node.dataset.bbox = el.bbox.join(',');
-    node.dataset.label = el.label;
-    // Find a matching entity (string match against extraction_text)
-    const matchIdx = entityList.findIndex(e => bboxLabelMatchesEntity(el.label, e.extraction_text));
-    if (matchIdx >= 0) node.dataset.entityIndex = String(matchIdx);
-    const labelTag = document.createElement('span');
-    labelTag.className = 'entity-bbox-label';
-    labelTag.textContent = el.label.length > 36 ? el.label.slice(0, 33) + '…' : el.label;
-    node.appendChild(labelTag);
-    node.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (matchIdx >= 0) focusEntity(matchIdx);
-    });
-    layer.appendChild(node);
-  }
-  if (img.complete) place(); else img.addEventListener('load', place, { once: true });
-  requestAnimationFrame(place);
-  window.addEventListener('resize', place);
-}
-
-// Highlight grounded extraction_text spans inside any visible .source-content panes.
-// Uses string matching, not char-offset DOM mapping (the rendered DOM may differ from
-// the raw analysis text after Markdown rendering). One <mark> per occurrence.
-function refreshSourceHighlights() {
-  // Strip any existing marks first
-  document.querySelectorAll('mark.entity-highlight').forEach(m => {
-    const parent = m.parentNode;
-    if (!parent) return;
-    while (m.firstChild) parent.insertBefore(m.firstChild, m);
-    parent.removeChild(m);
-    parent.normalize();
-  });
-
-  const panelOpen = $('entitiesPanel')?.classList.contains('visible');
-  if (!panelOpen) return;
-  const page = state.pages[state.currentIndex];
-  if (!page) return;
-  const entities = entitiesCache[page.id];
-  if (!entities || !entities.extractions?.length) return;
-
-  // Sort by length desc so longer spans are wrapped before shorter substrings
-  const items = entities.extractions.slice().sort((a,b) => b.extraction_text.length - a.extraction_text.length);
-
-  const containers = document.querySelectorAll('.source-content');
-  containers.forEach(container => {
-    items.forEach((e, _i) => {
-      const idx = items.indexOf(e);
-      const globalIdx = entities.extractions.indexOf(e);
-      wrapTextOccurrences(container, e.extraction_text, e.extraction_class, globalIdx);
-    });
-  });
-}
-
-function wrapTextOccurrences(root, needle, cls, idx) {
-  if (!needle || needle.length < 2) return;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) => {
-      // Skip if we're already inside a mark
-      let p = node.parentNode;
-      while (p && p !== root) {
-        if (p.nodeType === 1 && p.tagName === 'MARK') return NodeFilter.FILTER_REJECT;
-        p = p.parentNode;
-      }
-      return node.nodeValue && node.nodeValue.includes(needle) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-    }
-  });
-  const targets = [];
-  while (walker.nextNode()) targets.push(walker.currentNode);
-  targets.forEach(textNode => {
-    const text = textNode.nodeValue;
-    let pos = text.indexOf(needle);
-    if (pos < 0) return;
-    const frag = document.createDocumentFragment();
-    let cursor = 0;
-    while (pos >= 0) {
-      if (pos > cursor) frag.appendChild(document.createTextNode(text.slice(cursor, pos)));
-      const mark = document.createElement('mark');
-      mark.className = `entity-highlight ent-${cls}`;
-      mark.dataset.entityIndex = idx;
-      mark.style.setProperty('background', `rgba(162,59,49,0.14)`);
-      mark.appendChild(document.createTextNode(needle));
-      mark.addEventListener('click', () => focusEntity(Number(mark.dataset.entityIndex)));
-      frag.appendChild(mark);
-      cursor = pos + needle.length;
-      pos = text.indexOf(needle, cursor);
-    }
-    if (cursor < text.length) frag.appendChild(document.createTextNode(text.slice(cursor)));
-    textNode.parentNode.replaceChild(frag, textNode);
-  });
-}
-
-function previewEntity(idx) {
-  // Hover preview: gently emphasize the corresponding source mark(s)
-  document.querySelectorAll('mark.entity-highlight.preview').forEach(m => m.classList.remove('preview'));
-  document.querySelectorAll(`mark.entity-highlight[data-entity-index="${idx}"]`).forEach(m => m.classList.add('preview'));
 }
 
 function focusEntity(idx) {
   activeEntityIndex = idx;
   document.querySelectorAll('.entity-card').forEach(c => c.classList.toggle('active', Number(c.dataset.entityIndex) === idx));
-  document.querySelectorAll('mark.entity-highlight.active').forEach(m => m.classList.remove('active'));
-  const marks = document.querySelectorAll(`mark.entity-highlight[data-entity-index="${idx}"]`);
-  marks.forEach(m => m.classList.add('active'));
-  if (marks[0]) marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
-  // Highlight matching bbox on the canvas, if any
-  document.querySelectorAll('.entity-bbox.active').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll(`.entity-bbox[data-entity-index="${idx}"]`).forEach(b => b.classList.add('active'));
+  const target = document.querySelector(`.entity-card[data-entity-index="${idx}"]`);
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 
@@ -2389,33 +2203,15 @@ $('galleryOverlay').addEventListener('click', () => closePanel('gallery'));
 $('entitiesBtn').addEventListener('click', openEntities);
 $('entitiesClose').addEventListener('click', () => closePanel('entities'));
 $('entitiesOverlay').addEventListener('click', () => closePanel('entities'));
-$('entitiesHighlightToggle').addEventListener('change', (e) => {
-  document.body.classList.toggle('no-entity-highlights', !e.target.checked);
-  const prefs = readEntitiesPrefs(); prefs.highlights = e.target.checked; writeEntitiesPrefs(prefs);
-});
-$('entitiesBboxToggle').addEventListener('change', async (e) => {
-  document.body.classList.toggle('show-entity-bboxes', e.target.checked);
-  const prefs = readEntitiesPrefs(); prefs.bboxes = e.target.checked; writeEntitiesPrefs(prefs);
-  if (!e.target.checked) return;
-  // First time on for this page: lazy-fetch (or generate) bboxes via vision call
-  const page = state.pages[state.currentIndex];
-  if (!page) return;
-  await ensureBboxesLoaded(page.id);
-  renderBboxLayer(page.id);
-  // Status line refresh
-  const cnt = bboxesCache[page.id]?.elements?.length || 0;
-  setEntitiesStatus(cnt
-    ? `${cnt} bounding-box element${cnt === 1 ? '' : 's'} drawn from vision call`
-    : 'No bounding boxes returned for this image — try a different image or re-run');
-});
 $('entitiesRefreshBtn').addEventListener('click', () => {
   const page = state.pages[state.currentIndex];
   if (!page) return;
-  if (entitiesCache[page.id]) {
-    if (!confirm('Re-run entity extraction? This re-spends 30–90 seconds on the local Gemma model.')) return;
+  const key = entitiesCacheKey(page);
+  if (entitiesCache[key]) {
+    if (!confirm('Re-run entity extraction? This re-spends 30–120 seconds on the local Gemma model.')) return;
   }
-  delete entitiesCache[page.id];
-  runEntitiesExtraction(page.id);
+  delete entitiesCache[key];
+  runEntitiesExtraction(page);
 });
 
 $('settingsBtn').addEventListener('click', openSettings);
