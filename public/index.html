@@ -245,6 +245,56 @@
   .learn-content strong { color: #333; }
   .learn-content code { font-family: monospace; background: #f0ede8; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
   .learn-timestamp { font-size: 11px; color: #bbb; text-align: right; margin-top: 16px; font-style: italic; }
+
+  /* --- Entities panel (langextract structured output) --- */
+  .entities-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 96vw); background: #faf8f5; border-left: 1px solid #e0dcd7; z-index: 52; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; box-shadow: -4px 0 24px rgba(0,0,0,0.08); }
+  .entities-panel.visible { transform: translateX(0); }
+  .entities-header { padding: 12px 16px; border-bottom: 1px solid #e8e4df; background: #fff; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .entities-header h2 { font-size: 15px; font-weight: 600; color: #444; margin: 0; }
+  .entities-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .entities-toggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #555; cursor: pointer; user-select: none; }
+  .entities-toggle input { margin: 0; }
+  .entities-refresh { padding: 4px 12px; font-size: 12px; }
+  .entities-status { padding: 8px 16px; font-size: 11px; color: #8a8378; background: #f5f1ec; border-bottom: 1px solid #ece6de; min-height: 16px; font-family: "SF Mono", ui-monospace, monospace; }
+  .entities-body { flex: 1; overflow-y: auto; padding: 14px 16px 22px; }
+  .entities-empty { padding: 32px 18px; color: #999; text-align: center; font-size: 13px; line-height: 1.55; }
+  .entities-empty button { margin-top: 12px; padding: 8px 18px; background: #5a7d6a; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 13px; }
+  .entities-empty button:hover { background: #4a6a58; }
+  .entities-empty button:disabled { opacity: 0.55; cursor: default; }
+  .entities-summary { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #ece6de; }
+  .entities-summary .summary-chip { font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid #d6cfc7; background: #fff; color: #5e5144; cursor: pointer; user-select: none; transition: background 0.15s, border-color 0.15s; font-family: "SF Mono", ui-monospace, monospace; }
+  .entities-summary .summary-chip:hover { border-color: #a23b31; }
+  .entities-summary .summary-chip.active { background: #a23b31; color: #fff; border-color: #a23b31; }
+  .entities-class-section { margin-bottom: 18px; }
+  .entities-class-section h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ent-color, #5e5144); margin: 0 0 8px; padding-left: 8px; border-left: 3px solid var(--ent-color, #5e5144); }
+  .entities-class-section .class-count { color: #aaa; font-weight: 400; margin-left: 6px; }
+  .entity-card { background: #fff; border: 1px solid #ece6de; border-left: 3px solid var(--ent-color, #d6cfc7); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; cursor: pointer; transition: background 0.12s, border-color 0.12s, transform 0.08s; position: relative; }
+  .entity-card:hover { background: #fff7f5; border-left-color: var(--ent-color, #a23b31); }
+  .entity-card.active { background: #fff1ed; border-color: var(--ent-color, #a23b31); border-left-width: 4px; }
+  .entity-card .entity-text { font-size: 13.5px; line-height: 1.45; color: #2c2925; word-break: break-word; }
+  .entity-card .entity-attrs { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
+  .entity-card .attr { font-size: 10.5px; padding: 1px 6px; border: 1px solid #ece6de; border-radius: 3px; color: #6e655a; background: #f9f5f0; font-family: "SF Mono", ui-monospace, monospace; }
+  .entity-card .attr .attr-key { color: #a89a86; }
+  .entity-card .entity-meta { position: absolute; right: 10px; top: 8px; font-size: 10px; color: #b8aea0; font-family: "SF Mono", ui-monospace, monospace; }
+  /* Per-class accent palette (used as left border / class header) */
+  .ent-component  { --ent-color: #2563a8; }
+  .ent-flow_step  { --ent-color: #a23b31; }
+  .ent-concept    { --ent-color: #6b5a3e; }
+  .ent-text_label { --ent-color: #496a7a; }
+  .ent-caption    { --ent-color: #5a7d6a; }
+  .ent-data_point { --ent-color: #8b5a3a; }
+  .ent-cta        { --ent-color: #ad3b85; }
+  /* Source-pane highlights driven by entitiesHighlightToggle */
+  .source-content mark.entity-highlight { background: rgba(162,59,49,0.14); color: inherit; padding: 0 2px; border-radius: 2px; cursor: pointer; transition: background 0.12s; }
+  .source-content mark.entity-highlight:hover { background: rgba(162,59,49,0.32); }
+  .source-content mark.entity-highlight.active { background: rgba(162,59,49,0.45); outline: 1px solid #a23b31; }
+  body.no-entity-highlights .source-content mark.entity-highlight { background: transparent; outline: none; }
+  /* Bounding-box overlay (image regions) — placeholder layer; hidden until we wire image-region bboxes */
+  .image-container .entity-bbox-layer { position: absolute; inset: 0; pointer-events: none; display: none; }
+  body.show-entity-bboxes .image-container .entity-bbox-layer { display: block; }
+  .entity-bbox { position: absolute; border: 2px solid #a23b31; background: rgba(162,59,49,0.08); border-radius: 3px; pointer-events: auto; cursor: pointer; }
+  .entity-bbox.active { background: rgba(162,59,49,0.22); border-width: 3px; }
+  .entity-bbox-label { position: absolute; top: -22px; left: 0; background: #a23b31; color: #fff; padding: 2px 7px; font-size: 11px; border-radius: 3px; white-space: nowrap; font-family: "SF Mono", ui-monospace, monospace; }
 </style>
 <script>
   window.MathJax = {
@@ -272,6 +322,7 @@
     <button class="btn drill-btn" id="drillBtn" disabled>Drill In</button>
     <button class="btn" id="resetBtn" disabled>Reset</button>
     <button class="btn" id="learnBtn" disabled>Learn</button>
+    <button class="btn" id="entitiesBtn" disabled>Entities</button>
     <button class="btn" id="galleryBtn">Gallery</button>
     <input class="global-language" id="globalLanguageInput" type="text" placeholder="Language">
     <button class="btn" id="settingsBtn">Models</button>
@@ -317,6 +368,28 @@
     </div>
   </div>
   <div class="learn-body" id="learnBody"></div>
+</div>
+
+<!-- Entities panel (langextract structured output) -->
+<div class="panel-overlay" id="entitiesOverlay"></div>
+<div class="entities-panel" id="entitiesPanel" role="dialog" aria-labelledby="entitiesPanelTitle">
+  <div class="entities-header">
+    <h2 id="entitiesPanelTitle">Structured Entities</h2>
+    <div class="entities-controls">
+      <label class="entities-toggle" title="Highlight grounded source spans in the left source pane">
+        <input type="checkbox" id="entitiesHighlightToggle" checked>
+        <span>Show source highlights</span>
+      </label>
+      <label class="entities-toggle" title="When image-region bounding boxes are available, overlay them on the source image">
+        <input type="checkbox" id="entitiesBboxToggle">
+        <span>Show bounding boxes</span>
+      </label>
+      <button class="btn entities-refresh" id="entitiesRefreshBtn" title="Re-run langextract on the current analysis text">Refresh</button>
+      <button class="panel-close" id="entitiesClose" aria-label="Close entities panel">&times;</button>
+    </div>
+  </div>
+  <div class="entities-status mono" id="entitiesStatus"></div>
+  <div class="entities-body" id="entitiesBody"></div>
 </div>
 
 <!-- Settings panel -->
@@ -676,6 +749,7 @@ function updateUI() {
   $('resetBtn').disabled = !hasPages || loading;
   $('drillBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
   $('learnBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
+  $('entitiesBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
   $('drillBtn').classList.toggle('active', state.drillMode);
 
   if (hasPages) {
@@ -1257,6 +1331,8 @@ function renderCurrentPage() {
   } else {
     canvas.appendChild(container);
   }
+  // Re-apply entity highlights if the entities panel is open and we have entities for this page
+  if (typeof refreshSourceHighlights === 'function') refreshSourceHighlights();
 }
 
 // --- Generation ---
@@ -1674,7 +1750,270 @@ async function runAnalysis(pageId, type) {
 function closePanel(name) {
   $(name + 'Overlay').classList.remove('visible');
   $(name + 'Panel').classList.remove('visible');
+  if (name === 'entities') {
+    document.body.classList.remove('show-entity-bboxes');
+    refreshSourceHighlights();  // strip marks when panel closes
+  }
 }
+
+// --- Entities panel (langextract) ---
+const entitiesCache = {};      // pageId → entities payload
+let entitiesLoadingId = null;
+let activeEntityIndex = -1;
+
+const ENTITIES_PREFS_KEY = 'illustratedExplainer.entitiesPrefs';
+function readEntitiesPrefs() {
+  try { return Object.assign({ highlights: true, bboxes: false }, JSON.parse(localStorage.getItem(ENTITIES_PREFS_KEY) || '{}')); }
+  catch { return { highlights: true, bboxes: false }; }
+}
+function writeEntitiesPrefs(prefs) {
+  try { localStorage.setItem(ENTITIES_PREFS_KEY, JSON.stringify(prefs)); } catch {}
+}
+
+function entityClassLabel(cls) {
+  return ({
+    component: 'Components',
+    flow_step: 'Flow Steps',
+    concept: 'Concepts',
+    text_label: 'Text Labels',
+    caption: 'Captions',
+    data_point: 'Data Points',
+    cta: 'Calls to Action',
+  })[cls] || cls;
+}
+
+async function openEntities() {
+  const page = state.pages[state.currentIndex];
+  if (!page) return;
+  $('entitiesOverlay').classList.add('visible');
+  $('entitiesPanel').classList.add('visible');
+
+  // Apply persisted toggle prefs
+  const prefs = readEntitiesPrefs();
+  $('entitiesHighlightToggle').checked = prefs.highlights;
+  $('entitiesBboxToggle').checked = prefs.bboxes;
+  document.body.classList.toggle('no-entity-highlights', !prefs.highlights);
+  document.body.classList.toggle('show-entity-bboxes', prefs.bboxes);
+
+  // Try cache first
+  if (!entitiesCache[page.id]) {
+    try {
+      const res = await fetch(`/api/entities/${page.id}`);
+      const data = await res.json();
+      if (data && data.entities) entitiesCache[page.id] = data.entities;
+    } catch { /* ignore */ }
+  }
+  renderEntitiesPanel();
+  refreshSourceHighlights();
+}
+
+function setEntitiesStatus(text) {
+  const el = $('entitiesStatus');
+  if (el) el.textContent = text || '';
+}
+
+function renderEntitiesPanel() {
+  const page = state.pages[state.currentIndex];
+  const body = $('entitiesBody');
+  if (!page) {
+    body.innerHTML = '<div class="entities-empty">No active page.</div>';
+    setEntitiesStatus('');
+    return;
+  }
+
+  if (entitiesLoadingId === page.id) {
+    body.innerHTML = `<div class="entities-empty"><span class="spinner" style="display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#a23b31;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:8px"></span>Running langextract on the analysis text…</div>`;
+    setEntitiesStatus('Working — local Gemma · this typically takes 30–90s on first run');
+    return;
+  }
+
+  const entities = entitiesCache[page.id];
+
+  if (!entities) {
+    const haveAnalysis = Boolean(learnCache[page.id]?.description || learnCache[page.id]?.explanation);
+    body.innerHTML = `
+      <div class="entities-empty">
+        <div>${haveAnalysis ? 'No structured entities yet for this page.' : 'Open the <strong>Learn</strong> panel first to generate the analysis text, then come back here to extract structured entities from it.'}</div>
+        ${haveAnalysis ? '<button id="entitiesGenerateBtn" type="button">Extract entities</button>' : ''}
+      </div>`;
+    if (haveAnalysis) {
+      $('entitiesGenerateBtn').addEventListener('click', () => runEntitiesExtraction(page.id));
+    }
+    setEntitiesStatus(haveAnalysis ? 'Idle — click "Extract entities" to run langextract on the cached analysis' : 'Waiting on analysis text');
+    return;
+  }
+
+  const items = Array.isArray(entities.extractions) ? entities.extractions : [];
+  const stats = entities.stats || {};
+  const byClass = items.reduce((acc, e) => { (acc[e.extraction_class] = acc[e.extraction_class] || []).push(e); return acc; }, {});
+  const orderedClasses = ['component','flow_step','concept','text_label','caption','data_point','cta'];
+  const classes = Object.keys(byClass).sort((a,b) => orderedClasses.indexOf(a) - orderedClasses.indexOf(b));
+
+  const summaryChips = classes.map(cls =>
+    `<button type="button" class="summary-chip ent-${cls}" data-class="${cls}" style="border-left: 3px solid var(--ent-color)">${entityClassLabel(cls)} · ${byClass[cls].length}</button>`
+  ).join('');
+
+  const sectionsHtml = classes.map((cls, ci) => {
+    const cards = byClass[cls].map((e, idx) => {
+      const globalIdx = items.indexOf(e);
+      const attrs = Object.entries(e.attributes || {})
+        .map(([k,v]) => `<span class="attr"><span class="attr-key">${escapeHtml(k)}</span>:${escapeHtml(String(v))}</span>`)
+        .join('');
+      const ci = e.char_interval || {};
+      const meta = (ci.start_pos !== undefined ? `${ci.start_pos}–${ci.end_pos}` : '');
+      return `
+        <div class="entity-card" data-entity-index="${globalIdx}" data-class="${cls}">
+          <div class="entity-text">${escapeHtml(e.extraction_text)}</div>
+          ${attrs ? `<div class="entity-attrs">${attrs}</div>` : ''}
+          ${meta ? `<div class="entity-meta">${meta}</div>` : ''}
+        </div>`;
+    }).join('');
+    return `<section class="entities-class-section ent-${cls}">
+      <h3>${entityClassLabel(cls)}<span class="class-count">· ${byClass[cls].length}</span></h3>
+      ${cards || '<div class="entities-empty" style="padding:8px;text-align:left">none</div>'}
+    </section>`;
+  }).join('');
+
+  body.innerHTML = `
+    ${summaryChips ? `<div class="entities-summary">${summaryChips}</div>` : ''}
+    ${sectionsHtml || '<div class="entities-empty">No grounded extractions returned.</div>'}
+  `;
+
+  body.querySelectorAll('.entity-card').forEach(card => {
+    card.addEventListener('mouseenter', () => previewEntity(Number(card.dataset.entityIndex)));
+    card.addEventListener('click', () => focusEntity(Number(card.dataset.entityIndex)));
+  });
+  body.querySelectorAll('.summary-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const cls = chip.dataset.class;
+      const target = body.querySelector(`.entities-class-section.ent-${cls}`);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      body.querySelectorAll('.summary-chip').forEach(c => c.classList.toggle('active', c === chip));
+    });
+  });
+
+  const total = stats.total ?? items.length;
+  const elapsed = stats.elapsed_ms ? `${(stats.elapsed_ms/1000).toFixed(1)}s` : '?';
+  const bboxNote = ' · image bboxes not yet available — toggle is wired for future vision-region step';
+  setEntitiesStatus(
+    `${items.length}/${total} grounded · ${classes.length} classes · ${elapsed} · model ${stats.model_id || 'local Gemma'}${bboxNote}`
+  );
+}
+
+async function runEntitiesExtraction(pageId) {
+  if (entitiesLoadingId) return;
+  entitiesLoadingId = pageId;
+  renderEntitiesPanel();
+  try {
+    const res = await fetch(`/api/entities/${pageId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || !data.entities) {
+      entitiesLoadingId = null;
+      const body = $('entitiesBody');
+      body.innerHTML = `<div class="entities-empty">Extraction failed: ${escapeHtml(data.error || ('HTTP ' + res.status))}<br><br><button id="entitiesGenerateBtn" type="button">Try again</button></div>`;
+      $('entitiesGenerateBtn')?.addEventListener('click', () => runEntitiesExtraction(pageId));
+      setEntitiesStatus('Failed');
+      return;
+    }
+    entitiesCache[pageId] = data.entities;
+  } catch (err) {
+    setEntitiesStatus('Error: ' + err.message);
+  } finally {
+    entitiesLoadingId = null;
+  }
+  if (state.pages[state.currentIndex]?.id === pageId) {
+    renderEntitiesPanel();
+    refreshSourceHighlights();
+  }
+}
+
+// Highlight grounded extraction_text spans inside any visible .source-content panes.
+// Uses string matching, not char-offset DOM mapping (the rendered DOM may differ from
+// the raw analysis text after Markdown rendering). One <mark> per occurrence.
+function refreshSourceHighlights() {
+  // Strip any existing marks first
+  document.querySelectorAll('mark.entity-highlight').forEach(m => {
+    const parent = m.parentNode;
+    if (!parent) return;
+    while (m.firstChild) parent.insertBefore(m.firstChild, m);
+    parent.removeChild(m);
+    parent.normalize();
+  });
+
+  const panelOpen = $('entitiesPanel')?.classList.contains('visible');
+  if (!panelOpen) return;
+  const page = state.pages[state.currentIndex];
+  if (!page) return;
+  const entities = entitiesCache[page.id];
+  if (!entities || !entities.extractions?.length) return;
+
+  // Sort by length desc so longer spans are wrapped before shorter substrings
+  const items = entities.extractions.slice().sort((a,b) => b.extraction_text.length - a.extraction_text.length);
+
+  const containers = document.querySelectorAll('.source-content');
+  containers.forEach(container => {
+    items.forEach((e, _i) => {
+      const idx = items.indexOf(e);
+      const globalIdx = entities.extractions.indexOf(e);
+      wrapTextOccurrences(container, e.extraction_text, e.extraction_class, globalIdx);
+    });
+  });
+}
+
+function wrapTextOccurrences(root, needle, cls, idx) {
+  if (!needle || needle.length < 2) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => {
+      // Skip if we're already inside a mark
+      let p = node.parentNode;
+      while (p && p !== root) {
+        if (p.nodeType === 1 && p.tagName === 'MARK') return NodeFilter.FILTER_REJECT;
+        p = p.parentNode;
+      }
+      return node.nodeValue && node.nodeValue.includes(needle) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+  const targets = [];
+  while (walker.nextNode()) targets.push(walker.currentNode);
+  targets.forEach(textNode => {
+    const text = textNode.nodeValue;
+    let pos = text.indexOf(needle);
+    if (pos < 0) return;
+    const frag = document.createDocumentFragment();
+    let cursor = 0;
+    while (pos >= 0) {
+      if (pos > cursor) frag.appendChild(document.createTextNode(text.slice(cursor, pos)));
+      const mark = document.createElement('mark');
+      mark.className = `entity-highlight ent-${cls}`;
+      mark.dataset.entityIndex = idx;
+      mark.style.setProperty('background', `rgba(162,59,49,0.14)`);
+      mark.appendChild(document.createTextNode(needle));
+      mark.addEventListener('click', () => focusEntity(Number(mark.dataset.entityIndex)));
+      frag.appendChild(mark);
+      cursor = pos + needle.length;
+      pos = text.indexOf(needle, cursor);
+    }
+    if (cursor < text.length) frag.appendChild(document.createTextNode(text.slice(cursor)));
+    textNode.parentNode.replaceChild(frag, textNode);
+  });
+}
+
+function previewEntity(idx) {
+  // Hover preview: gently emphasize the corresponding source mark(s)
+  document.querySelectorAll('mark.entity-highlight.preview').forEach(m => m.classList.remove('preview'));
+  document.querySelectorAll(`mark.entity-highlight[data-entity-index="${idx}"]`).forEach(m => m.classList.add('preview'));
+}
+
+function focusEntity(idx) {
+  activeEntityIndex = idx;
+  document.querySelectorAll('.entity-card').forEach(c => c.classList.toggle('active', Number(c.dataset.entityIndex) === idx));
+  document.querySelectorAll('mark.entity-highlight.active').forEach(m => m.classList.remove('active'));
+  const marks = document.querySelectorAll(`mark.entity-highlight[data-entity-index="${idx}"]`);
+  marks.forEach(m => m.classList.add('active'));
+  if (marks[0]) marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+
 
 // --- Event listeners ---
 
@@ -1734,6 +2073,22 @@ $('learnTabs').addEventListener('click', (e) => {
 $('galleryBtn').addEventListener('click', openGallery);
 $('galleryClose').addEventListener('click', () => closePanel('gallery'));
 $('galleryOverlay').addEventListener('click', () => closePanel('gallery'));
+
+$('entitiesBtn').addEventListener('click', openEntities);
+$('entitiesClose').addEventListener('click', () => closePanel('entities'));
+$('entitiesOverlay').addEventListener('click', () => closePanel('entities'));
+$('entitiesHighlightToggle').addEventListener('change', (e) => {
+  document.body.classList.toggle('no-entity-highlights', !e.target.checked);
+  const prefs = readEntitiesPrefs(); prefs.highlights = e.target.checked; writeEntitiesPrefs(prefs);
+});
+$('entitiesBboxToggle').addEventListener('change', (e) => {
+  document.body.classList.toggle('show-entity-bboxes', e.target.checked);
+  const prefs = readEntitiesPrefs(); prefs.bboxes = e.target.checked; writeEntitiesPrefs(prefs);
+});
+$('entitiesRefreshBtn').addEventListener('click', () => {
+  const page = state.pages[state.currentIndex];
+  if (page) { delete entitiesCache[page.id]; runEntitiesExtraction(page.id); }
+});
 
 $('settingsBtn').addEventListener('click', openSettings);
 $('settingsClose').addEventListener('click', () => closePanel('settings'));
