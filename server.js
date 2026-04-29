@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import dotenv from 'dotenv';
 dotenv.config({ override: true });
 import express from 'express';
@@ -1937,6 +1938,128 @@ app.post('/api/analysis/:pageId', async (req, res) => {
     saveAnalysis(pageId, existing);
     res.status(500).json({ error: `Analysis failed: ${err.message}`, ...existing });
   }
+});
+
+// --- LangExtract structured-entities API (experiment/langextract) ---
+// Spawns tools/langextract/helper.py via its venv-installed Python; returns
+// grounded entities with char_intervals back into the analysis Markdown.
+// If the helper or local Gemma server is unavailable, returns an error so the
+// frontend can degrade gracefully without blocking the existing flow.
+
+const LANGEXTRACT_DIR = path.join(__dirname, 'tools', 'langextract');
+const LANGEXTRACT_PY = path.join(LANGEXTRACT_DIR, '.venv', 'bin', 'python');
+const LANGEXTRACT_SCRIPT = path.join(LANGEXTRACT_DIR, 'helper.py');
+
+function runLangextractHelper(text, opts = {}) {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(LANGEXTRACT_PY) || !fs.existsSync(LANGEXTRACT_SCRIPT)) {
+      resolve({
+        extractions: [],
+        stats: {},
+        error: 'helper not installed — run tools/langextract/setup.sh',
+      });
+      return;
+    }
+
+    const proc = spawn(LANGEXTRACT_PY, [LANGEXTRACT_SCRIPT], {
+      cwd: LANGEXTRACT_DIR,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (chunk) => { stdout += chunk; });
+    proc.stderr.on('data', (chunk) => { stderr += chunk; });
+
+    const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 240000;
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch {}
+      resolve({ extractions: [], stats: {}, error: `helper timeout after ${timeoutMs}ms` });
+    }, timeoutMs);
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ extractions: [], stats: {}, error: `spawn failed: ${err.message}` });
+    });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        resolve({
+          extractions: [],
+          stats: {},
+          error: `helper exited ${code}: ${stderr.trim().slice(-400)}`,
+        });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout.trim().split('\n').pop() || '{}');
+        resolve(parsed);
+      } catch (err) {
+        resolve({ extractions: [], stats: {}, error: `bad helper output: ${err.message}` });
+      }
+    });
+
+    const payload = {
+      text,
+      model_id: opts.modelId || undefined,
+      base_url: opts.baseUrl || undefined,
+      max_char_buffer: opts.maxCharBuffer || undefined,
+      extraction_passes: opts.extractionPasses || undefined,
+    };
+    proc.stdin.end(JSON.stringify(payload));
+  });
+}
+
+app.get('/api/entities/:pageId', (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
+    return res.status(400).json({ error: 'Invalid page ID' });
+  }
+  const cached = loadAnalysis(pageId);
+  if (cached && cached.entities) {
+    return res.json({ entities: cached.entities, source: cached.entities.source || null });
+  }
+  res.json({ entities: null });
+});
+
+app.post('/api/entities/:pageId', async (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
+    return res.status(400).json({ error: 'Invalid page ID' });
+  }
+  const analysis = loadAnalysis(pageId);
+  if (!analysis || (!analysis.description && !analysis.explanation)) {
+    return res.status(400).json({
+      error: 'No analysis text available — generate the description/explanation first.',
+    });
+  }
+
+  const text = [analysis.description, analysis.explanation]
+    .filter(Boolean)
+    .join('\n\n');
+
+  console.log(`[entities] Running langextract for ${pageId} (${text.length} chars)...`);
+  const result = await runLangextractHelper(text);
+
+  if (result.error) {
+    console.error(`[entities] ${result.error}`);
+    return res.status(502).json({ error: result.error });
+  }
+
+  analysis.entities = {
+    extractions: result.extractions,
+    stats: result.stats,
+    sourceText: text,
+    generatedAt: new Date().toISOString(),
+  };
+  saveAnalysis(pageId, analysis);
+
+  console.log(
+    `[entities] ${result.stats.grounded || 0}/${result.stats.total || 0} grounded ` +
+    `in ${result.stats.elapsed_ms || '?'}ms`
+  );
+  res.json({ entities: analysis.entities });
 });
 
 // --- Gallery API ---
