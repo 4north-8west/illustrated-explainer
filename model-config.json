@@ -10,6 +10,6 @@
   },
   "analysis": {
     "provider": "local",
-    "model": "auto"
+    "model": "gemma-4-E4B"
   }
 }

@@ -2026,9 +2026,14 @@ function renderEntitiesPanel() {
 
   const total = stats.total ?? items.length;
   const elapsed = stats.elapsed_ms ? `${(stats.elapsed_ms/1000).toFixed(1)}s` : '?';
-  const bboxNote = ' · image bboxes not yet available — toggle is wired for future vision-region step';
+  const sourceLabel = entities.sourceKind === 'pdf-extracted'
+    ? 'source: PDF text extraction (pdftotext)'
+    : entities.sourceKind === 'vision-analysis'
+      ? 'source: vision-derived analysis'
+      : 'source: ' + (entities.sourceKind || 'unknown');
+  const bboxNote = ' · click "Show bounding boxes" to generate image-region overlays';
   setEntitiesStatus(
-    `${items.length}/${total} grounded · ${classes.length} classes · ${elapsed} · model ${stats.model_id || 'local Gemma'}${bboxNote}`
+    `${items.length}/${total} grounded · ${classes.length} classes · ${elapsed} · model ${stats.model_id || 'local Gemma'} · ${sourceLabel}${bboxNote}`
   );
 }
 
