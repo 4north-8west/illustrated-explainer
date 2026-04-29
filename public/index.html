@@ -274,6 +274,8 @@
   .entity-card .attr { font-size: 10.5px; padding: 1px 6px; border: 1px solid #ece6de; border-radius: 3px; color: #6e655a; background: #f9f5f0; font-family: "SF Mono", ui-monospace, monospace; }
   .entity-card .attr .attr-key { color: #a89a86; }
   .entity-card .entity-meta { position: absolute; right: 10px; top: 8px; font-size: 10px; color: #b8aea0; font-family: "SF Mono", ui-monospace, monospace; }
+  .entity-card .entity-page { display: inline-block; font-size: 10.5px; padding: 1px 7px; margin-right: 5px; border: 1px solid var(--ent-color, #d6cfc7); border-radius: 3px; color: var(--ent-color, #6e655a); background: #fff; font-family: "SF Mono", ui-monospace, monospace; font-weight: 600; }
+  .entity-card .entity-page::before { content: "p."; opacity: 0.6; margin-right: 2px; }
   /* Per-class accent palette (used as left border / class header) */
   .ent-component  { --ent-color: #2563a8; }
   .ent-flow_step  { --ent-color: #a23b31; }
@@ -1960,14 +1962,19 @@ function renderEntitiesPanel() {
   const sectionsHtml = classes.map((cls, ci) => {
     const cards = byClass[cls].map((e, idx) => {
       const globalIdx = items.indexOf(e);
+      const pageNum = e.attributes?.page;
       const attrs = Object.entries(e.attributes || {})
+        .filter(([k]) => k !== 'page') // page is rendered as its own badge
         .map(([k,v]) => `<span class="attr"><span class="attr-key">${escapeHtml(k)}</span>:${escapeHtml(String(v))}</span>`)
         .join('');
       const ci = e.char_interval || {};
       const meta = (ci.start_pos !== undefined ? `${ci.start_pos}–${ci.end_pos}` : '');
+      const pageBadge = pageNum
+        ? `<span class="entity-page" title="Click card to jump to page ${pageNum}">${escapeHtml(String(pageNum))}</span>`
+        : '';
       return `
-        <div class="entity-card" data-entity-index="${globalIdx}" data-class="${cls}">
-          <div class="entity-text">${escapeHtml(e.extraction_text)}</div>
+        <div class="entity-card" data-entity-index="${globalIdx}" data-class="${cls}" ${pageNum ? `data-page="${pageNum}"` : ''}>
+          <div class="entity-text">${pageBadge}${escapeHtml(e.extraction_text)}</div>
           ${attrs ? `<div class="entity-attrs">${attrs}</div>` : ''}
           ${meta ? `<div class="entity-meta">${meta}</div>` : ''}
         </div>`;
@@ -1998,6 +2005,7 @@ function renderEntitiesPanel() {
   const total = stats.total ?? items.length;
   const elapsed = stats.elapsed_ms ? `${(stats.elapsed_ms/1000).toFixed(1)}s` : '?';
   const sourceMap = {
+    'pdf-doc-page-concat': 'source: pdftotext per-page concat (page-attributed)',
     'pdf-doc-docling': 'source: docling whole-document extraction',
     'pdf-doc-concat': 'source: pdftotext (concatenated pages)',
     'pdf-extracted': 'source: pdftotext (single page)',
@@ -2137,6 +2145,26 @@ function focusEntity(idx) {
   document.querySelectorAll('.entity-card').forEach(c => c.classList.toggle('active', Number(c.dataset.entityIndex) === idx));
   const target = document.querySelector(`.entity-card[data-entity-index="${idx}"]`);
   if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  // If the entity carries a page attribution and the current view is a PDF,
+  // jump to that page within the same document. The user clicked a typed
+  // entity card to navigate — keep the entities panel open.
+  const pageAttr = target?.dataset?.page;
+  if (!pageAttr) return;
+  const pageNum = Number(pageAttr);
+  if (!Number.isFinite(pageNum)) return;
+  const cur = state.pages[state.currentIndex];
+  if (!cur?.pdfDocId) return;
+  const targetIdx = state.pages.findIndex(p =>
+    p.pdfDocId === cur.pdfDocId && Number(p.pdfPageNumber) === pageNum
+  );
+  if (targetIdx >= 0 && targetIdx !== state.currentIndex) {
+    state.currentIndex = targetIdx;
+    state.pendingClick = null;
+    renderCurrentPage();
+    updateUI();
+    saveSession();
+  }
 }
 
 
