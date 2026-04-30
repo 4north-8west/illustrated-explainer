@@ -144,6 +144,13 @@
   .drill-text-menu button:hover { background: #faf3e3; }
   .drill-text-menu .drill-text-menu-label { display: block; font-weight: 600; color: #333; }
   .drill-text-menu .drill-text-menu-desc { display: block; font-size: 11px; color: #888; margin-top: 2px; }
+  /* Intent quick-pick chips row (Phase A.3) — appears when the parent page is classified */
+  .intent-chip-row { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 2px 2px; }
+  .intent-chip-label { font-size: 10px; color: #999; letter-spacing: 0.06em; text-transform: uppercase; margin-right: 2px; }
+  .intent-chip { padding: 3px 9px; background: #fff; border: 1px solid #ddd6cc; border-radius: 12px; font-family: inherit; font-size: 11px; color: #6b5a3e; cursor: pointer; transition: all 0.12s; line-height: 1.3; }
+  .intent-chip:hover { background: #faf3e3; border-color: #b8a06f; color: #4f463b; }
+  /* "Suggested" hint on the recommended item in the drill-as-text menu */
+  .drill-text-menu .drill-text-menu-suggested { display: inline-block; font-size: 10px; color: #5a7d6a; background: #e8f1ec; padding: 0 6px; border-radius: 8px; margin-left: 6px; vertical-align: middle; letter-spacing: 0.04em; text-transform: uppercase; }
   @media (max-width: 720px) {
     .confirm-bar { left: 8px; right: 8px; bottom: 8px; max-width: calc(100% - 16px); }
     .confirm-intent, .confirm-select { flex: 1 1 100%; }
@@ -712,6 +719,48 @@ async function fetchSavedPage(pageId) {
 // The server still has any drill-down descendants on disk; pull them lazily so
 // the persistent drill-target markers reappear without forcing the user to
 // re-navigate. Dedup by pageId so we never refetch in the same tab.
+// Poll once for a freshly-completed classification on an image page that
+// rendered before its background classify pass finished. Bounded retry: up to
+// 10 attempts, every 5s (= ~50s total), then gives up. Only runs once per
+// pageId per session.
+const _classifyChecked = new Set();
+function ensureClassifiedRefreshed(pageId) {
+  if (!pageId || _classifyChecked.has(pageId)) return;
+  _classifyChecked.add(pageId);
+  let attempts = 0;
+  const tick = async () => {
+    attempts++;
+    try {
+      const res = await fetch(`/api/classify/${pageId}`);
+      if (res.ok) {
+        const { classified } = await res.json();
+        if (classified && !classified.fallback_used) {
+          // Patch state with the slim subset the page object carries
+          const idx = state.pages.findIndex(p => p.id === pageId);
+          if (idx !== -1) {
+            state.pages[idx] = {
+              ...state.pages[idx],
+              classified: {
+                category: classified.category,
+                confidence: classified.category_confidence,
+                style_preset: classified.style?.preset || null,
+                drill_hints: classified.drill_hints || null,
+              },
+            };
+            // Re-render only if the user is still viewing this page
+            if (state.pages[state.currentIndex]?.id === pageId) renderCurrentPage();
+            saveSession();
+          }
+          return; // done
+        }
+      }
+    } catch { /* swallow; retry */ }
+    if (attempts < 10) setTimeout(tick, 5000);
+  };
+  // First check after 3s — gives the background classify a head start
+  setTimeout(tick, 3000);
+}
+
 const _descendantsFetched = new Set();
 async function ensureDescendantsLoaded(pageId) {
   if (!pageId || _descendantsFetched.has(pageId)) return;
@@ -1078,6 +1127,11 @@ function renderCurrentPage() {
   // targets are visible even after a session restore or gallery reload.
   if (page.type === 'image') ensureDescendantsLoaded(page.id);
 
+  // Phase A.3: when an image hasn't been classified yet, poll once after a
+  // short delay to pick up the result of the background classify pass that
+  // runs on every upload/generation. Cheap and bounded.
+  if (page.type === 'image' && !page.classified) ensureClassifiedRefreshed(page.id);
+
   canvas.className = 'canvas-area';
   canvas.innerHTML = '';
 
@@ -1280,7 +1334,14 @@ function renderCurrentPage() {
     if (img.complete) placeMarker(); else img.onload = placeMarker;
     requestAnimationFrame(placeMarker);
 
-    // Confirm bar — primary "Drill into image" action + secondary "Drill as text ▾" dropdown
+    // Confirm bar — when the parent image is classified (Phase A.3), the
+    // primary button label/action come from drill_hints.suggested_default.
+    // The "Drill as text ▾" popover always shows the alternatives (whichever
+    // option is currently primary is omitted to avoid duplication).
+    const drillHints = page.classified?.drill_hints || null;
+    const primaryKind = drillHints?.suggested_default || 'image';
+    const primaryLabel = drillHints?.suggested_default_label || 'Drill into image';
+
     const bar = document.createElement('div');
     bar.className = 'confirm-bar';
     const intentInput = document.createElement('input');
@@ -1308,32 +1369,61 @@ function renderCurrentPage() {
       generateChildPage(page.id, x, y, kind, intent);
     };
 
+    // Intent quick-pick chips (only if classified). Click prefills the input.
+    let chipRow = null;
+    if (drillHints?.suggested_intents?.length) {
+      chipRow = document.createElement('div');
+      chipRow.className = 'intent-chip-row';
+      const lbl = document.createElement('span');
+      lbl.className = 'intent-chip-label';
+      lbl.textContent = 'Try:';
+      chipRow.appendChild(lbl);
+      for (const text of drillHints.suggested_intents.slice(0, 4)) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'intent-chip';
+        chip.textContent = text;
+        chip.title = 'Use this question (you can still edit before drilling)';
+        chip.onclick = (ev) => {
+          ev.preventDefault();
+          intentInput.value = text;
+          intentInput.focus();
+        };
+        chipRow.appendChild(chip);
+      }
+    }
+
     const goBtn = document.createElement('button');
     goBtn.className = 'btn confirm-go';
-    goBtn.textContent = 'Drill into image';
-    goBtn.title = 'Generate a deeper illustration of this region';
-    goBtn.onclick = () => commit('image');
+    goBtn.textContent = primaryLabel;
+    goBtn.title = drillHints
+      ? `Suggested for this image (category: ${page.classified.category})`
+      : 'Generate a deeper illustration of this region';
+    goBtn.onclick = () => commit(primaryKind);
 
-    // Drill-as-text popover: one secondary button reveals the four text variants
+    // Alternatives popover: shows every kind EXCEPT the one that's primary
+    const allOptions = [
+      { kind: 'image',    label: 'Drill into image', desc: 'Generate a deeper illustration of this region' },
+      { kind: 'markdown', label: 'Explanation',      desc: 'Long-form prose answering "what is this?"' },
+      { kind: 'chart',    label: 'Chart',            desc: 'Quantitative summary as a small chart' },
+      { kind: 'table',    label: 'Table',            desc: 'Structured comparison or inventory' },
+      { kind: 'diagram',  label: 'Diagram',          desc: 'Schematic relationship or flow' },
+    ];
+    const otherOptions = allOptions.filter(o => o.kind !== primaryKind);
+
     const textWrap = document.createElement('div');
     textWrap.className = 'drill-text-wrap';
     const textTrigger = document.createElement('button');
     textTrigger.className = 'btn drill-text-trigger';
-    textTrigger.textContent = 'Drill as text';
-    textTrigger.title = 'Generate a textual explanation, chart, table, or diagram instead';
+    textTrigger.textContent = primaryKind === 'image' ? 'Drill as text' : 'Other format';
+    textTrigger.title = 'Generate this region in a different format';
     textTrigger.onclick = (ev) => {
       ev.stopPropagation();
       textWrap.classList.toggle('open');
     };
     const textMenu = document.createElement('div');
     textMenu.className = 'drill-text-menu';
-    const textOptions = [
-      { kind: 'markdown', label: 'Explanation',  desc: 'Long-form prose answering "what is this?"' },
-      { kind: 'chart',    label: 'Chart',        desc: 'Quantitative summary as a small chart' },
-      { kind: 'table',    label: 'Table',        desc: 'Structured comparison or inventory' },
-      { kind: 'diagram',  label: 'Diagram',      desc: 'Schematic relationship or flow' },
-    ];
-    for (const opt of textOptions) {
+    for (const opt of otherOptions) {
       const item = document.createElement('button');
       item.type = 'button';
       item.innerHTML = `<span class="drill-text-menu-label">${escapeHtml(opt.label)}</span><span class="drill-text-menu-desc">${escapeHtml(opt.desc)}</span>`;
@@ -1351,6 +1441,7 @@ function renderCurrentPage() {
     cancelBtn.textContent = 'Cancel';
     cancelBtn.onclick = () => { document.removeEventListener('click', closeMenuOnOutside); state.pendingClick = null; renderCurrentPage(); };
 
+    if (chipRow) bar.appendChild(chipRow);
     bar.appendChild(intentInput);
     bar.appendChild(depthSelect);
     bar.appendChild(goBtn);

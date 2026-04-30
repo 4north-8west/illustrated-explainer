@@ -1474,6 +1474,19 @@ function pageFromMetadata(pageId) {
 
   const imagePath = path.join(GENERATED_DIR, meta.folder, `${pageId}.png`);
   if (!fs.existsSync(imagePath)) return null;
+  // Include the slim subset of classified data the client needs for the
+  // drill confirm bar (category + drill hints + style preset). The full
+  // structured payload is still available via GET /api/classify/:pageId.
+  // Returns null if the image hasn't been classified yet — client renders
+  // its existing default UI in that case.
+  const cached = loadAnalysis(pageId);
+  const c = cached?.classified;
+  const classifiedSlim = c && !c.fallback_used ? {
+    category: c.category,
+    confidence: c.category_confidence,
+    style_preset: c.style?.preset || null,
+    drill_hints: c.drill_hints || null,
+  } : null;
   return {
     id: pageId,
     type: 'image',
@@ -1484,6 +1497,7 @@ function pageFromMetadata(pageId) {
     mode: meta.mode || 'illustration',
     intent: meta.intent || '',
     contextPageId: meta.contextPageId || null,
+    classified: classifiedSlim,
   };
 }
 
