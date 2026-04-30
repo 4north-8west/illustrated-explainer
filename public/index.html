@@ -218,24 +218,36 @@
   .panel-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
 
   /* Gallery items */
+  .gallery-controls { position: sticky; top: 0; background: #faf8f5; padding: 4px 0 12px; margin-bottom: 12px; border-bottom: 1px solid #e8e4df; z-index: 1; }
+  .gallery-search { width: 100%; padding: 8px 12px; border: 1px solid #d6cfc7; border-radius: 7px; font-family: inherit; font-size: 13px; background: #fff; outline: none; }
+  .gallery-search:focus { border-color: #999; }
+  .gallery-mode-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .gallery-mode-pill { padding: 4px 11px; background: #fff; border: 1px solid #d6cfc7; border-radius: 13px; font-size: 11px; color: #6b5a3e; cursor: pointer; font-family: inherit; transition: all 0.12s; }
+  .gallery-mode-pill:hover { background: #faf3e3; border-color: #b8a06f; }
+  .gallery-mode-pill.active { background: #6b5a3e; color: #fff; border-color: #6b5a3e; }
+  .gallery-empty-filter { padding: 24px; text-align: center; color: #999; font-style: italic; font-size: 13px; }
   .gallery-base-path { font-size: 11px; color: #999; font-family: monospace; padding: 6px 10px; background: #f7f5f2; border-radius: 4px; margin-bottom: 14px; word-break: break-all; }
   .gallery-folder { margin-bottom: 16px; border: 1px solid #e8e4df; border-radius: 6px; overflow: hidden; }
-  .gallery-folder-header { padding: 8px 12px; background: #faf8f5; border-bottom: 1px solid #e8e4df; display: flex; justify-content: space-between; align-items: center; }
-  .gallery-folder-title { font-size: 12px; font-weight: 600; color: #444; }
-  .gallery-folder-meta { font-size: 11px; color: #999; display: flex; gap: 8px; align-items: center; }
-  .mode-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: #e8f5e9; color: #2e7d32; }
+  .gallery-folder.is-hidden { display: none; }
+  .gallery-folder-header { padding: 10px 12px 8px; background: #faf8f5; border-bottom: 1px solid #e8e4df; display: flex; flex-direction: column; gap: 4px; }
+  .gallery-folder-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .gallery-folder-title { font-size: 13px; font-weight: 600; color: #333; line-height: 1.3; }
+  .gallery-folder-meta { font-size: 11px; color: #888; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .gallery-folder-meta .meta-sep { opacity: 0.4; }
+  .mode-tag { font-size: 10px; padding: 1px 7px; border-radius: 3px; background: #e8f1ec; color: #2e6b4a; letter-spacing: 0.02em; }
   .mode-tag.map { background: #fff3e0; color: #6b5a3e; }
-  .gallery-folder-path { font-size: 10px; color: #bbb; font-family: monospace; padding: 4px 12px; word-break: break-all; }
+  .mode-tag.upload { background: #f0e8d8; color: #6b5a3e; }
   .gallery-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; padding: 8px 12px; }
-  .gallery-img-card { border-radius: 4px; overflow: hidden; border: 1px solid #e8e4df; cursor: pointer; }
-  .gallery-img-card:hover { border-color: #aaa; }
+  .gallery-img-card { border-radius: 4px; overflow: hidden; border: 1px solid #e8e4df; cursor: pointer; transition: border-color 0.12s; }
+  .gallery-img-card:hover { border-color: #888; }
   .gallery-img-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
-  .gallery-img-meta { font-size: 9px; color: #999; padding: 3px 6px; font-family: monospace; display: flex; justify-content: space-between; }
+  .gallery-img-meta { font-size: 10px; color: #999; padding: 4px 6px; display: flex; justify-content: flex-end; }
   .gallery-texts { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; padding: 0 12px 10px; }
-  .gallery-text-card { border-radius: 4px; border: 1px solid #e8e4df; background: #fff; padding: 8px 10px; }
+  .gallery-text-card { border-radius: 4px; border: 1px solid #e8e4df; background: #fff; padding: 8px 10px; cursor: pointer; transition: border-color 0.12s; }
+  .gallery-text-card:hover { border-color: #888; }
   .gallery-text-title { font-size: 12px; font-weight: 600; color: #4b4032; line-height: 1.3; margin-bottom: 5px; }
-  .gallery-text-meta { font-size: 9px; color: #999; font-family: monospace; display: flex; justify-content: space-between; gap: 8px; }
-  .gallery-open-folder { padding: 3px 8px; border: 1px solid #d5d0ca; border-radius: 5px; background: #fff; font-family: inherit; font-size: 10px; color: #555; cursor: pointer; }
+  .gallery-text-meta { font-size: 10px; color: #999; display: flex; justify-content: flex-end; gap: 8px; }
+  .gallery-open-folder { padding: 3px 9px; border: 1px solid #d5d0ca; border-radius: 5px; background: #fff; font-family: inherit; font-size: 11px; color: #555; cursor: pointer; }
   .gallery-open-folder:hover { background: #f0ede8; }
 
   /* Settings panel */
@@ -641,7 +653,7 @@ function rendererActions(page) {
     ? `<input class="renderer-language" id="rendererLanguage" placeholder="Language" value="${language}"><button class="renderer-action-btn" id="translatePageBtn">Translate</button>`
     : '';
   const removable = state.pages.length > 1
-    ? `<button class="renderer-action-btn" id="removePageBtn">Remove</button>`
+    ? `<button class="renderer-action-btn" id="removePageBtn" title="Delete this page from the current session">Delete page</button>`
     : '';
   return `<div class="renderer-actions">${translate}${removable}</div>`;
 }
@@ -1581,40 +1593,132 @@ async function openGallery() {
   try {
     const res = await fetch('/api/gallery');
     const data = await res.json();
-    if (data.folders.length === 0) { $('galleryBody').innerHTML = '<p style="color:#999;font-style:italic">No images yet.</p>'; return; }
-    let html = `<div class="gallery-base-path">${data.generatedDir}</div>`;
-    for (const f of data.folders) {
-      const modeConfig = state.modes.find(m => m.id === f.mode);
-      const tag = modeConfig?.tagLabel || f.mode || 'illustration';
-      const folderIds = [...(f.images || []), ...(f.texts || [])]
-        .sort((a, b) => new Date(a.created) - new Date(b.created))
-        .map(item => item.id);
-      html += `<div class="gallery-folder"><div class="gallery-folder-header"><span class="gallery-folder-title">${escapeHtml(f.query)}</span><span class="gallery-folder-meta"><button class="gallery-open-folder" data-folder-ids="${escapeHtml(folderIds.join(','))}">Open Folder</button><span class="mode-tag">${escapeHtml(tag)}</span>${f.imageCount} images${f.textCount ? ` · ${f.textCount} text` : ''}<span>${formatBytes(f.totalSize)}</span></span></div>`;
-      html += `<div class="gallery-folder-path">${f.path}</div><div class="gallery-images">`;
-      for (const img of f.images) {
-        html += `<div class="gallery-img-card" data-page-id="${img.id}"><img src="${img.url}" loading="lazy"><div class="gallery-img-meta"><span>${img.id.slice(0,8)}...</span><span>${formatBytes(img.size)}</span></div></div>`;
-      }
-      html += '</div>';
-      if (f.texts?.length) {
-        html += '<div class="gallery-texts">';
-        for (const text of f.texts) {
-          html += `<div class="gallery-text-card" data-page-id="${text.id}"><div class="gallery-text-title">${escapeHtml(text.title || 'Text drill-down')}</div><div class="gallery-text-meta"><span>${text.id.slice(0,8)}...</span><span>${formatBytes(text.size)}</span></div></div>`;
-        }
-        html += '</div>';
+    if (!data.folders || data.folders.length === 0) {
+      $('galleryBody').innerHTML = '<p style="color:#999;font-style:italic">No images yet — generate or upload one to see it here.</p>';
+      return;
+    }
+    renderGallery(data);
+  } catch (err) {
+    $('galleryBody').innerHTML = `<p style="color:#b91c1c">Error loading gallery: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+// Render the gallery panel with sticky search + mode pills, sorted by most-recent activity.
+function renderGallery(data) {
+  // Tag each folder with derived metadata: latest activity timestamp + a normalized
+  // "kind" used for filtering. Uploads are detected by the upload- folder-name prefix.
+  const folders = data.folders.map(f => {
+    const allItems = [...(f.images || []), ...(f.texts || [])];
+    const latest = allItems.reduce((acc, item) => {
+      const t = new Date(item.created || 0).getTime();
+      return t > acc ? t : acc;
+    }, 0);
+    const isUpload = (f.name || '').startsWith('upload-');
+    return { ...f, _latest: latest, _isUpload: isUpload };
+  }).sort((a, b) => b._latest - a._latest);
+
+  // Build the set of distinct "kinds" for the filter pills.
+  const kinds = new Map();
+  kinds.set('all', { id: 'all', label: 'All', count: folders.length });
+  let uploadCount = 0;
+  for (const f of folders) {
+    if (f._isUpload) { uploadCount++; continue; }
+    const k = f.mode || 'illustration';
+    if (!kinds.has(k)) {
+      const mc = state.modes.find(m => m.id === k);
+      kinds.set(k, { id: k, label: mc?.label || (k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' ')), count: 0 });
+    }
+    kinds.get(k).count++;
+  }
+  if (uploadCount > 0) kinds.set('_upload', { id: '_upload', label: 'Uploaded', count: uploadCount });
+
+  // Build the sticky controls header
+  const pillsHtml = [...kinds.values()].map(k =>
+    `<button type="button" class="gallery-mode-pill${k.id === 'all' ? ' active' : ''}" data-kind="${escapeHtml(k.id)}">${escapeHtml(k.label)} <span style="opacity:0.7">${k.count}</span></button>`
+  ).join('');
+  let html = `<div class="gallery-controls">
+    <input type="text" class="gallery-search" id="gallerySearch" placeholder="Search prompts...">
+    <div class="gallery-mode-pills" id="galleryModePills">${pillsHtml}</div>
+  </div>`;
+  html += `<div class="gallery-base-path">${escapeHtml(data.generatedDir)}</div>`;
+  html += `<div id="galleryFolderList">`;
+  for (const f of folders) {
+    const modeConfig = state.modes.find(m => m.id === f.mode);
+    const tag = f._isUpload ? 'upload' : (modeConfig?.tagLabel || f.mode || 'illustration');
+    const tagClass = f._isUpload ? 'upload' : (f.mode === 'historical_map' ? 'map' : '');
+    const folderIds = [...(f.images || []), ...(f.texts || [])]
+      .sort((a, b) => new Date(a.created) - new Date(b.created))
+      .map(item => item.id);
+    const filterKind = f._isUpload ? '_upload' : (f.mode || 'illustration');
+    const searchHaystack = (f.query || '').toLowerCase();
+    html += `<div class="gallery-folder" data-kind="${escapeHtml(filterKind)}" data-search="${escapeHtml(searchHaystack)}">`;
+    html += `<div class="gallery-folder-header">
+        <div class="gallery-folder-title-row">
+          <span class="gallery-folder-title">${escapeHtml(f.query || f.name || 'Untitled')}</span>
+          <button class="gallery-open-folder" data-folder-ids="${escapeHtml(folderIds.join(','))}">Open all in session</button>
+        </div>
+        <div class="gallery-folder-meta">
+          <span class="mode-tag ${tagClass}">${escapeHtml(tag)}</span>
+          <span>${f.imageCount} ${f.imageCount === 1 ? 'image' : 'images'}</span>
+          ${f.textCount ? `<span class="meta-sep">·</span><span>${f.textCount} text</span>` : ''}
+          <span class="meta-sep">·</span><span>${formatBytes(f.totalSize)}</span>
+        </div>
+      </div>`;
+    html += `<div class="gallery-images">`;
+    for (const img of f.images) {
+      html += `<div class="gallery-img-card" data-page-id="${img.id}"><img src="${img.url}" loading="lazy" alt="${escapeHtml(f.query || 'image')}"><div class="gallery-img-meta"><span>${formatBytes(img.size)}</span></div></div>`;
+    }
+    html += '</div>';
+    if (f.texts?.length) {
+      html += '<div class="gallery-texts">';
+      for (const text of f.texts) {
+        html += `<div class="gallery-text-card" data-page-id="${text.id}"><div class="gallery-text-title">${escapeHtml(text.title || 'Text drill-down')}</div><div class="gallery-text-meta"><span>${formatBytes(text.size)}</span></div></div>`;
       }
       html += '</div>';
     }
-    $('galleryBody').innerHTML = html;
-    $('galleryBody').querySelectorAll('[data-page-id]').forEach(card => {
-      card.addEventListener('click', () => loadPageIntoSession(card.dataset.pageId));
+    html += '</div>';
+  }
+  html += `</div><div class="gallery-empty-filter" id="galleryEmptyFilter" style="display:none">No folders match your filter.</div>`;
+  $('galleryBody').innerHTML = html;
+
+  // Wire up: search, mode pills, card clicks, open-folder buttons
+  let activeKind = 'all';
+  let activeQuery = '';
+  const applyFilters = () => {
+    const folderEls = $('galleryBody').querySelectorAll('.gallery-folder');
+    let visible = 0;
+    folderEls.forEach(el => {
+      const kindOk = activeKind === 'all' || el.dataset.kind === activeKind;
+      const searchOk = !activeQuery || el.dataset.search.includes(activeQuery);
+      const show = kindOk && searchOk;
+      el.classList.toggle('is-hidden', !show);
+      if (show) visible++;
     });
-    $('galleryBody').querySelectorAll('[data-folder-ids]').forEach(button => {
-      button.addEventListener('click', (event) => {
-        event.stopPropagation();
-        loadPagesIntoSession(button.dataset.folderIds.split(',').filter(Boolean));
-      });
+    $('galleryEmptyFilter').style.display = visible === 0 ? 'block' : 'none';
+  };
+
+  $('gallerySearch').addEventListener('input', (e) => {
+    activeQuery = e.target.value.trim().toLowerCase();
+    applyFilters();
+  });
+  $('galleryModePills').addEventListener('click', (e) => {
+    const pill = e.target.closest('.gallery-mode-pill');
+    if (!pill) return;
+    activeKind = pill.dataset.kind;
+    $('galleryModePills').querySelectorAll('.gallery-mode-pill').forEach(p => p.classList.toggle('active', p === pill));
+    applyFilters();
+  });
+  $('galleryBody').querySelectorAll('[data-page-id]').forEach(card => {
+    card.addEventListener('click', () => loadPageIntoSession(card.dataset.pageId));
+  });
+  $('galleryBody').querySelectorAll('[data-folder-ids]').forEach(button => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      loadPagesIntoSession(button.dataset.folderIds.split(',').filter(Boolean));
     });
-  } catch (err) { $('galleryBody').innerHTML = `<p style="color:#b91c1c">Error: ${err.message}</p>`; }
+  });
+  // Auto-focus the search box for keyboard-first browsing
+  setTimeout(() => $('gallerySearch')?.focus(), 50);
 }
 
 // --- Settings ---
@@ -1917,6 +2021,45 @@ $('galleryOverlay').addEventListener('click', () => closePanel('gallery'));
 $('settingsBtn').addEventListener('click', openSettings);
 $('settingsClose').addEventListener('click', () => closePanel('settings'));
 $('settingsOverlay').addEventListener('click', () => closePanel('settings'));
+
+// Global keyboard shortcuts (skip when typing in form fields)
+document.addEventListener('keydown', (e) => {
+  const t = e.target;
+  const tag = t?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  if (e.key === 'Escape') {
+    if (state.pendingClick) { state.pendingClick = null; renderCurrentPage(); return; }
+    if ($('learnPanel').classList.contains('visible')) { closePanel('learn'); return; }
+    if ($('galleryPanel').classList.contains('visible')) { closePanel('gallery'); return; }
+    if ($('settingsPanel').classList.contains('visible')) { closePanel('settings'); return; }
+    return;
+  }
+  // Letter shortcuts only fire on a fresh keypress
+  const k = e.key.toLowerCase();
+  if (k === 'b' && !$('backBtn').disabled)   { e.preventDefault(); $('backBtn').click(); return; }
+  if (k === 'd' && !$('drillBtn').disabled)  { e.preventDefault(); $('drillBtn').click(); return; }
+  if (k === 'l' && !$('learnBtn').disabled)  { e.preventDefault(); $('learnBtn').click(); return; }
+  if (k === 'g')                              { e.preventDefault(); $('galleryBtn').click(); return; }
+  if (k === '?' || (k === '/' && e.shiftKey)){ e.preventDefault(); showShortcutsToast(); return; }
+});
+
+function showShortcutsToast() {
+  const existing = document.getElementById('shortcutsToast');
+  if (existing) { existing.remove(); return; }
+  const el = document.createElement('div');
+  el.id = 'shortcutsToast';
+  el.style.cssText = 'position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:#fff;border:1px solid #d6cfc7;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:14px 18px;z-index:60;font-size:12px;color:#555;line-height:1.7;font-family:inherit;';
+  el.innerHTML = '<strong style="display:block;margin-bottom:6px;color:#333">Keyboard shortcuts</strong>'
+    + '<kbd style="font-family:inherit;background:#f0ede8;padding:1px 6px;border-radius:3px">B</kbd> Back · '
+    + '<kbd style="font-family:inherit;background:#f0ede8;padding:1px 6px;border-radius:3px">D</kbd> Drill in · '
+    + '<kbd style="font-family:inherit;background:#f0ede8;padding:1px 6px;border-radius:3px">L</kbd> Learn · '
+    + '<kbd style="font-family:inherit;background:#f0ede8;padding:1px 6px;border-radius:3px">G</kbd> Gallery · '
+    + '<kbd style="font-family:inherit;background:#f0ede8;padding:1px 6px;border-radius:3px">Esc</kbd> Close';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
 
 loadModes().then(restoreSession).finally(() => { renderCurrentPage(); updateUI(); });
 </script>
