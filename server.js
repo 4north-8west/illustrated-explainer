@@ -617,14 +617,21 @@ async function generateFirstPage(query, mode) {
   return callGeneration(prompt);
 }
 
-async function generateChildPage(compositedImageBuffer, mode, intent = '', contextTrail = []) {
+async function generateChildPage(compositedImageBuffer, mode, intent = '', contextTrail = [], parentClassified = null) {
   const modeConfig = MODES[mode];
   const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
   const intentPrompt = intent
     ? `\n\nLearner intent for this drill-down: ${intent}\nUse that intent to decide what details to reveal while still focusing on the marked region.`
     : '';
   const sourcePrompt = uploadContextPrompt(uploadContext, 2500);
-  const prompt = renderTemplate(modeConfig.childPageTemplate, { style: modeConfig.style }) + intentPrompt + sourcePrompt;
+  // Phase A.2: when the parent image was classified, inject its classified
+  // payload as additional generation context. The model uses category-specific
+  // facts (e.g. chart axes, flyer dates, diagram subject) and the style
+  // descriptor to produce a child image that matches the parent's content
+  // and visual style instead of defaulting to the mode's stock watercolor look.
+  const parentCtx = buildGenerationContext(parentClassified);
+  const parentCtxBlock = parentCtx ? `\n\n${parentCtx}\n\nMatch the parent's visual style above when generating this child image.` : '';
+  const prompt = renderTemplate(modeConfig.childPageTemplate, { style: modeConfig.style }) + intentPrompt + sourcePrompt + parentCtxBlock;
   return callEditing(prompt, compositedImageBuffer);
 }
 
@@ -652,6 +659,15 @@ function loadPageContent(folder, id) {
 
 function savePageContent(folder, id, page) {
   fs.writeFileSync(pageJsonPath(folder, id), JSON.stringify(page, null, 2));
+}
+
+// Load the cached classified payload for a page, or null if not yet classified
+// (or page is not an image). Phase A.2 uses this to thread parent context into
+// the drill child generation prompts.
+function loadParentClassified(parentId) {
+  if (!parentId) return null;
+  const analysis = loadAnalysis(parentId);
+  return analysis?.classified || null;
 }
 
 function buildContextTrail(pageId) {
@@ -703,7 +719,7 @@ ${uploadContext.content.slice(0, maxChars)}
 Use this source context as primary evidence for uploaded images, especially visible text, labels, equations, axis names, legends, and table/chart structure. If the focused crop is ambiguous, prefer values and labels supported by this context and explicitly mark uncertainty.`;
 }
 
-async function generateTextDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
+async function generateTextDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '', parentClassified = null) {
   const imageBase64 = compositedImageBuffer.toString('base64');
   const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
   const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
@@ -713,6 +729,8 @@ async function generateTextDrillPage(compositedImageBuffer, mode, intent, contex
     return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
   }).join('\n');
   const uploadContextText = uploadContextPrompt(uploadContext);
+  const parentCtx = buildGenerationContext(parentClassified);
+  const parentCtxBlock = parentCtx ? `\n\n${parentCtx}` : '';
 
   const systemPrompt = `You are an expert STEM-capable educator. Explain only the exact selected region in an image, not the image as a whole. Prefer precise text, equations, tables, or concise examples over generating another image. Use Markdown. If math is needed, use valid LaTeX with inline math in $...$ and display math in $$...$$.`;
   const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
@@ -726,7 +744,7 @@ Learner intent: ${intent || 'Explain what is marked and why it matters.'}
 ${responseDepthInstruction(responseDepth, language)}
 
 Drill-down context:
-${contextText || 'No prior context available.'}${uploadContextText}
+${contextText || 'No prior context available.'}${uploadContextText}${parentCtxBlock}
 
 Respond with a focused Markdown learning page:
 - Start with a short title.
@@ -904,7 +922,7 @@ function normalizeDiagramSpec(spec) {
   };
 }
 
-async function generateChartDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
+async function generateChartDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '', parentClassified = null) {
   const imageBase64 = compositedImageBuffer.toString('base64');
   const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
   const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
@@ -914,6 +932,8 @@ async function generateChartDrillPage(compositedImageBuffer, mode, intent, conte
     return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
   }).join('\n');
   const uploadContextText = uploadContextPrompt(uploadContext);
+  const parentCtx = buildGenerationContext(parentClassified);
+  const parentCtxBlock = parentCtx ? `\n\n${parentCtx}` : '';
 
   const systemPrompt = `You convert only the exact selected image region into a simple educational chart specification. Return JSON only. Use inferred or approximate values only when the selected region, OCR/transcription context, and surrounding page context support them. Describe uncertainty and cite evidence for every plotted point.`;
   const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
@@ -927,7 +947,7 @@ Learner intent: ${intent || 'Turn the marked region into a useful chart or graph
 ${responseDepthInstruction(responseDepth, language)}
 
 Drill-down context:
-${contextText || 'No prior context available.'}${uploadContextText}
+${contextText || 'No prior context available.'}${uploadContextText}${parentCtxBlock}
 
 Return one JSON object only, with this shape:
 {
@@ -999,7 +1019,7 @@ Return corrected JSON only. If the selected region cannot support a trustworthy 
   return { chart, source };
 }
 
-async function generateTableDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
+async function generateTableDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '', parentClassified = null) {
   const imageBase64 = compositedImageBuffer.toString('base64');
   const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
   const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
@@ -1009,6 +1029,9 @@ async function generateTableDrillPage(compositedImageBuffer, mode, intent, conte
     return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
   }).join('\n');
   const uploadContextText = uploadContextPrompt(uploadContext);
+
+  const parentCtx = buildGenerationContext(parentClassified);
+  const parentCtxBlock = parentCtx ? `\n\n${parentCtx}` : '';
 
   const systemPrompt = `You convert only the exact selected image region into a locally renderable educational table. Return JSON only. Use uploaded OCR/transcription context as primary evidence for visible text, labels, equations, and values. Preserve visible wording when extraction is requested.`;
   const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
@@ -1022,7 +1045,7 @@ Learner intent: ${intent || 'Organize the marked region as a useful table.'}
 ${responseDepthInstruction(responseDepth, language)}
 
 Drill-down context:
-${contextText || 'No prior context available.'}${uploadContextText}
+${contextText || 'No prior context available.'}${uploadContextText}${parentCtxBlock}
 
 Return one JSON object only, with this shape:
 {
@@ -1057,7 +1080,7 @@ Rules:
   return { table, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
 }
 
-async function generateDiagramDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '') {
+async function generateDiagramDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '', parentClassified = null) {
   const imageBase64 = compositedImageBuffer.toString('base64');
   const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
   const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
@@ -1067,6 +1090,9 @@ async function generateDiagramDrillPage(compositedImageBuffer, mode, intent, con
     return `${step}. ${item.type} page about "${item.query}" (${item.mode}).${intentText}`;
   }).join('\n');
   const uploadContextText = uploadContextPrompt(uploadContext);
+
+  const parentCtx = buildGenerationContext(parentClassified);
+  const parentCtxBlock = parentCtx ? `\n\n${parentCtx}` : '';
 
   const systemPrompt = `You convert only the exact selected image region into a locally renderable educational diagram specification. Return JSON only. Use uploaded OCR/transcription context as primary evidence for visible text, labels, equations, and relationships. The app will render the diagram itself as SVG; do not request image generation.`;
   const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
@@ -1080,7 +1106,7 @@ Learner intent: ${intent || 'Turn the marked region into a concept or process di
 ${responseDepthInstruction(responseDepth, language)}
 
 Drill-down context:
-${contextText || 'No prior context available.'}${uploadContextText}
+${contextText || 'No prior context available.'}${uploadContextText}${parentCtxBlock}
 
 Return one JSON object only, with this shape:
 {
@@ -1585,13 +1611,17 @@ app.post('/api/page', async (req, res) => {
           ? await compositeFocusImage(parentPath, parentClick.x, parentClick.y)
           : null;
         const contextTrail = buildContextTrail(parentId);
+        // Phase A.2: pull the parent's classified payload (if any) so generators
+        // can match style and reference category-specific facts when generating
+        // the drill child.
+        const parentClassified = loadParentClassified(parentId);
         if (responseKind === 'markdown') {
           const textPath = pageJsonPath(folder, id);
           if (fs.existsSync(textPath)) {
             const cached = loadPageContent(folder, id);
             if (cached) return cached;
           }
-          const result = await generateTextDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language);
+          const result = await generateTextDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language, parentClassified);
           const page = {
             id,
             type: 'markdown',
@@ -1618,7 +1648,7 @@ app.post('/api/page', async (req, res) => {
             const cached = loadPageContent(folder, id);
             if (cached) return cached;
           }
-          const result = await generateChartDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language);
+          const result = await generateChartDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language, parentClassified);
           if (result.chart.chartability === 'low') {
             const page = {
               id,
@@ -1667,7 +1697,7 @@ app.post('/api/page', async (req, res) => {
             const cached = loadPageContent(folder, id);
             if (cached) return cached;
           }
-          const result = await generateTableDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language);
+          const result = await generateTableDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language, parentClassified);
           const page = {
             id,
             type: 'table',
@@ -1694,7 +1724,7 @@ app.post('/api/page', async (req, res) => {
             const cached = loadPageContent(folder, id);
             if (cached) return cached;
           }
-          const result = await generateDiagramDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language);
+          const result = await generateDiagramDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language, parentClassified);
           const page = {
             id,
             type: 'diagram',
@@ -1715,13 +1745,17 @@ app.post('/api/page', async (req, res) => {
           console.log(`Saved: ${diagramPath}`);
           return page;
         }
-        imageBuffer = await generateChildPage(composited, mode, intent, contextTrail);
+        imageBuffer = await generateChildPage(composited, mode, intent, contextTrail, parentClassified);
       }
 
       fs.writeFileSync(imagePath, imageBuffer);
       pageMeta[id] = { folder, query: initialQuery || pageMeta[parentId]?.query, mode, type: 'image', parentId: parentPageId, parentClick: parentClickData, intent };
       saveMetadata(pageMeta);
       console.log(`Saved: ${imagePath} (${imageBuffer.length} bytes)`);
+
+      // Phase A: every image (first-page or drill child) gets classified in the
+      // background so the next drill from this page can reuse the classification.
+      enqueueClassify(id);
 
       return { id, type: 'image', imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode };
     });
