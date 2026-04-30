@@ -89,7 +89,13 @@ async function callLlamaServer(systemPrompt, userPrompt, imageBase64) {
       },
     ],
     temperature: 0.2,
-    max_tokens: 2048,
+    // 4096 tokens (~9000 chars of structured JSON) gives the densest realistic
+    // payloads (multi-step process diagrams, flyers with full contact + CTA
+    // lists, charts with many data points) plenty of room. Earlier attempts
+    // at 2048 truncated mid-payload on dense content; 4096 with the
+    // response_format: json_object constraint avoids both truncation and the
+    // unconstrained runaway-newline mode the model fell into without it.
+    max_tokens: 4096,
     response_format: { type: 'json_object' },
   };
   const res = await fetch(CHAT_ENDPOINT, {
