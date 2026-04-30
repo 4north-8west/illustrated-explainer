@@ -145,11 +145,19 @@ async function main() {
 
   const meta = loadMetadata();
   const candidates = [];
+  let orphanedSkipped = 0;
   for (const [id, m] of Object.entries(meta)) {
     if (m?.type !== 'image') continue;
     if (!FORCE && isAlreadyClassified(id)) continue;
+    // Filter orphans: metadata entries whose PNG file no longer exists. These
+    // are typically left over from carve-outs or moved files. Skipping them
+    // is non-destructive — metadata stays intact, we just don't try to
+    // classify a file that isn't there.
+    const imagePath = path.join(GENERATED, m.folder || '', `${id}.png`);
+    if (!fs.existsSync(imagePath)) { orphanedSkipped++; continue; }
     candidates.push({ id, query: m.query || '(unnamed)', folder: m.folder || '?' });
   }
+  if (orphanedSkipped) console.log(`Skipped ${orphanedSkipped} orphaned metadata entries (PNG file missing on disk).`);
 
   console.log(`Found ${Object.keys(meta).length} pages total, ${candidates.length} image pages need${FORCE ? ' (force)' : ''} classification.`);
   if (LIMIT < candidates.length) console.log(`Will process the first ${LIMIT} (--limit).`);
