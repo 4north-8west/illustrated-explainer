@@ -9,32 +9,57 @@
   body { font-family: 'Georgia', serif; background: #faf8f5; color: #333; height: 100vh; min-height: 620px; display: flex; flex-direction: column; overflow: hidden; }
 
   /* --- Top bar --- */
-  .top-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e8e4df; flex-shrink: 0; gap: 12px; flex-wrap: wrap; }
+  .top-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e8e4df; flex-shrink: 0; gap: 16px; flex-wrap: wrap; }
+  .top-bar-brand { display: flex; align-items: baseline; gap: 12px; }
   .top-bar h1 { font-size: 16px; font-weight: 600; color: #555; letter-spacing: 0.5px; white-space: nowrap; }
-  .top-bar .page-counter { font-size: 13px; color: #888; min-width: 50px; text-align: center; }
-  .controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .btn { padding: 5px 14px; border: 1px solid #ccc; background: #fff; border-radius: 6px; font-family: inherit; font-size: 12px; cursor: pointer; color: #555; transition: all 0.15s; }
-  .btn:hover:not(:disabled) { background: #f0ede8; border-color: #aaa; }
-  .btn:disabled { opacity: 0.4; cursor: default; }
-  .btn.drill-btn { padding: 8px 20px; border-color: #a23b31; background: #fff7f5; color: #8f2d25; font-size: 13px; font-weight: 800; box-shadow: inset 0 0 0 1px rgba(162,59,49,0.08); }
-  .btn.drill-btn:not(:disabled)::before { content: "◎ "; font-weight: 700; }
-  .btn.drill-btn:hover:not(:disabled) { background: #fff1ef; border-color: #8f2d25; }
-  .btn.drill-btn.active { background: #a23b31; color: #fff; border-color: #a23b31; box-shadow: 0 0 0 2px rgba(162,59,49,0.18); }
-  .btn.drill-btn.active:hover { background: #842e28; }
-  .global-language { width: 120px; padding: 5px 9px; border: 1px solid #ccc; border-radius: 6px; font-family: inherit; font-size: 12px; color: #555; background: #fff; }
+  .top-bar .page-counter { font-size: 12px; color: #999; }
+  .controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+  .btn-cluster { display: flex; gap: 4px; align-items: center; padding: 0 10px; position: relative; }
+  .btn-cluster + .btn-cluster::before { content: ""; position: absolute; left: -1px; top: 22%; bottom: 22%; width: 1px; background: #e8e4df; }
+  .btn { padding: 6px 12px; border: 1px solid transparent; background: transparent; border-radius: 6px; font-family: inherit; font-size: 12px; cursor: pointer; color: #555; transition: all 0.15s; display: inline-flex; align-items: center; gap: 5px; }
+  .btn:hover:not(:disabled) { background: #f0ede8; color: #333; }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn .btn-glyph { font-size: 13px; opacity: 0.7; }
+  .btn.primary { padding: 7px 18px; background: #a23b31; color: #fff; border-color: #a23b31; font-weight: 600; box-shadow: 0 1px 3px rgba(162,59,49,0.18); }
+  .btn.primary:not(:disabled)::before { content: "◎ "; font-weight: 700; margin-right: 2px; }
+  .btn.primary:hover:not(:disabled) { background: #8f2d25; border-color: #8f2d25; color: #fff; }
+  .btn.primary.active { background: #842e28; border-color: #842e28; box-shadow: 0 0 0 3px rgba(162,59,49,0.18), inset 0 1px 2px rgba(0,0,0,0.15); }
 
   /* --- Topic area --- */
   .topic-area { display: flex; justify-content: center; padding: 14px 20px; flex-shrink: 0; }
-  .topic-form { display: flex; gap: 8px; width: 100%; max-width: 700px; align-items: center; flex-wrap: wrap; }
+  .topic-form { display: flex; gap: 8px; width: 100%; max-width: 760px; align-items: center; flex-wrap: wrap; }
   .topic-input { flex: 1; min-width: 180px; padding: 8px 14px; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; font-size: 14px; background: #fff; outline: none; }
   .topic-input:focus { border-color: #999; }
   .topic-input:disabled { opacity: 0.5; }
+  .mode-select { padding: 8px 30px 8px 12px; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; font-size: 13px; background: #fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M0 0l5 6 5-6z' fill='%23888'/></svg>") no-repeat right 10px center; appearance: none; -webkit-appearance: none; color: #555; cursor: pointer; }
+  .mode-select:hover:not(:disabled) { border-color: #999; }
+  .mode-select:disabled { opacity: 0.5; cursor: default; }
   .generate-btn { padding: 8px 20px; background: #5a7d6a; color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
   .generate-btn:hover:not(:disabled) { background: #4a6a58; }
   .generate-btn:disabled { opacity: 0.5; cursor: default; }
   .upload-btn { padding: 8px 14px; background: #fff; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; font-size: 12px; cursor: pointer; color: #555; }
   .upload-btn:hover { background: #f0ede8; border-color: #aaa; }
   .upload-btn:disabled { opacity: 0.5; cursor: default; }
+
+  /* --- Empty state cards --- */
+  .empty-state { width: 100%; max-width: 880px; margin: 0 auto; padding: 24px 20px; display: flex; flex-direction: column; gap: 24px; align-items: center; }
+  .empty-state-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; width: 100%; }
+  .empty-card { background: #fff; border: 1px solid #e8e4df; border-radius: 10px; padding: 22px 22px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.03); display: flex; flex-direction: column; gap: 10px; }
+  .empty-card .empty-card-icon { font-size: 22px; line-height: 1; color: #5a7d6a; }
+  .empty-card.upload .empty-card-icon { color: #6b5a3e; }
+  .empty-card h3 { font-size: 15px; font-weight: 600; color: #444; margin: 0; }
+  .empty-card p { font-size: 13px; color: #777; line-height: 1.5; margin: 0; flex: 1; }
+  .empty-card .empty-card-cta { margin-top: 8px; }
+  .empty-card .empty-card-cta button { padding: 8px 16px; border-radius: 7px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border: none; }
+  .empty-card.generate .empty-card-cta button { background: #5a7d6a; color: #fff; }
+  .empty-card.generate .empty-card-cta button:hover { background: #4a6a58; }
+  .empty-card.upload .empty-card-cta button { background: #fff; color: #6b5a3e; border: 1px solid #d6c8a8; }
+  .empty-card.upload .empty-card-cta button:hover { background: #faf3e3; border-color: #b8a06f; }
+  .empty-state-examples { width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .empty-state-examples-label { font-size: 11px; color: #999; letter-spacing: 0.06em; text-transform: uppercase; }
+  .empty-state-examples-chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 760px; }
+  .example-chip { padding: 5px 12px; background: #fff; border: 1px solid #ddd6cc; border-radius: 14px; font-size: 12px; color: #6b5a3e; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+  .example-chip:hover { background: #faf3e3; border-color: #b8a06f; color: #4f463b; }
 
   /* --- Canvas area --- */
   .canvas-area { flex: 1 1 auto; display: flex; align-items: flex-start; justify-content: center; padding: 12px 20px; position: relative; min-height: 0; overflow: hidden; }
@@ -266,22 +291,30 @@
 <body>
 
 <div class="top-bar">
-  <h1>Illustrated Explainer</h1>
-  <span class="page-counter" id="pageCounter"></span>
+  <div class="top-bar-brand">
+    <h1>Illustrated Explainer</h1>
+    <span class="page-counter" id="pageCounter"></span>
+  </div>
   <div class="controls">
-    <button class="btn" id="backBtn" disabled>Back</button>
-    <button class="btn drill-btn" id="drillBtn" disabled>Drill In</button>
-    <button class="btn" id="resetBtn" disabled>Reset</button>
-    <button class="btn" id="learnBtn" disabled>Learn</button>
-    <button class="btn" id="galleryBtn">Gallery</button>
-    <input class="global-language" id="globalLanguageInput" type="text" placeholder="Language">
-    <button class="btn" id="settingsBtn">Models</button>
+    <div class="btn-cluster">
+      <button class="btn" id="backBtn" disabled title="Back to previous page"><span class="btn-glyph">←</span> Back</button>
+      <button class="btn" id="resetBtn" disabled title="Clear session and start over">New Session</button>
+    </div>
+    <div class="btn-cluster">
+      <button class="btn primary" id="drillBtn" disabled title="Drill into the current image">Drill In</button>
+    </div>
+    <div class="btn-cluster">
+      <button class="btn" id="learnBtn" disabled title="Generate accessible analysis"><span class="btn-glyph">📖</span> Learn</button>
+      <button class="btn" id="galleryBtn" title="Browse all generated images"><span class="btn-glyph">▦</span> Gallery</button>
+      <button class="btn" id="settingsBtn" title="Model configuration and preferences"><span class="btn-glyph">⚙</span> Settings</button>
+    </div>
   </div>
 </div>
 
 <div class="topic-area">
   <form class="topic-form" id="topicForm">
-    <input class="topic-input" id="topicInput" type="text" placeholder="Ask for any explainer, equation, science process, historical map, or diagram..." maxlength="300" autofocus>
+    <input class="topic-input" id="topicInput" type="text" placeholder="Type a topic to illustrate..." maxlength="300" autofocus>
+    <select class="mode-select" id="modeSelect" title="Choose a generation style"><option value="auto">Auto</option></select>
     <button class="generate-btn" id="generateBtn" type="submit">Generate</button>
     <button type="button" class="upload-btn" id="uploadBtn">Upload Image</button>
     <input type="file" id="fileInput" accept="image/*">
@@ -290,9 +323,7 @@
 
 <div class="error-banner" id="errorBanner"></div>
 
-<div class="canvas-area empty" id="canvasArea">
-  Type a topic above — or upload your own image to start drilling into it
-</div>
+<div class="canvas-area empty" id="canvasArea"><!-- Empty state injected by renderCurrentPage() on first paint --></div>
 <div class="status-note" id="statusNote" style="display:none;"></div>
 
 <div class="thumbnail-strip hidden" id="thumbnailStrip"></div>
@@ -535,7 +566,24 @@ function currentModeConfig() {
 }
 
 function renderModeSelector() {
-  if ($('topicInput')) $('topicInput').placeholder = currentModeConfig().placeholder;
+  const select = $('modeSelect');
+  if (select && state.modes.length) {
+    const previous = state.mode;
+    // Build options: Auto first, then the modes from /api/modes (excluding any that already have id 'auto')
+    const opts = ['<option value="auto">Auto</option>'];
+    for (const m of state.modes) {
+      if (m.id === 'auto') continue;
+      opts.push(`<option value="${escapeHtml(m.id)}">${escapeHtml(m.label || m.id)}</option>`);
+    }
+    select.innerHTML = opts.join('');
+    select.value = previous && [...select.options].some(o => o.value === previous) ? previous : 'auto';
+  }
+  if ($('topicInput')) {
+    const placeholder = state.mode === 'auto'
+      ? 'Type a topic to illustrate...'
+      : (currentModeConfig().placeholder || 'Type a topic to illustrate...');
+    $('topicInput').placeholder = placeholder;
+  }
 }
 
 async function loadModes() {
@@ -705,7 +753,6 @@ function updateUI() {
   const { pages, currentIndex, loading } = state;
   const hasPages = pages.length > 0;
   $('pageCounter').textContent = hasPages ? `${currentIndex + 1} / ${pages.length}` : '';
-  if ($('globalLanguageInput') && $('globalLanguageInput').value !== state.language) $('globalLanguageInput').value = state.language;
   $('backBtn').disabled = currentIndex <= 0 || loading;
   $('resetBtn').disabled = !hasPages || loading;
   $('drillBtn').disabled = !hasPages || loading || pages[currentIndex]?.type !== 'image';
@@ -954,12 +1001,42 @@ function loadSourceContext(pageId) {
     });
 }
 
+const EMPTY_STATE_HTML = `
+  <div class="empty-state">
+    <div class="empty-state-cards">
+      <div class="empty-card generate">
+        <span class="empty-card-icon">✏️</span>
+        <h3>Generate from a topic</h3>
+        <p>Type any subject above and we'll illustrate it. Click any region of the image to drill in deeper — image, text, chart, table, or diagram.</p>
+        <div class="empty-card-cta"><button type="button" data-empty-action="focus-input">Type a topic →</button></div>
+      </div>
+      <div class="empty-card upload">
+        <span class="empty-card-icon">⬆️</span>
+        <h3>Upload your own image</h3>
+        <p>Drop in a diagram, photo, or screenshot to start drilling into specific regions for accessible analysis and explanation.</p>
+        <div class="empty-card-cta"><button type="button" data-empty-action="upload">Choose file…</button></div>
+      </div>
+    </div>
+    <div class="empty-state-examples">
+      <div class="empty-state-examples-label">Or try an example</div>
+      <div class="empty-state-examples-chips">
+        <button type="button" class="example-chip" data-topic="how a clock works">how a clock works</button>
+        <button type="button" class="example-chip" data-topic="how a piano works">how a piano works</button>
+        <button type="button" class="example-chip" data-topic="how the human heart works">how the human heart works</button>
+        <button type="button" class="example-chip" data-topic="roman empire at its peak under trajan 117 AD" data-mode="historical_map">roman empire 117 AD</button>
+        <button type="button" class="example-chip" data-topic="1600s global silver trade" data-mode="historical_map">1600s silver trade</button>
+        <button type="button" class="example-chip" data-topic="how does an electric dryer work">electric dryer</button>
+      </div>
+    </div>
+  </div>
+`;
+
 function renderCurrentPage() {
   const page = state.pages[state.currentIndex];
   const canvas = $('canvasArea');
   if (!page) {
     canvas.className = 'canvas-area empty';
-    canvas.innerHTML = 'Type a topic above — or upload your own image to start drilling into it';
+    canvas.innerHTML = EMPTY_STATE_HTML;
     return;
   }
   // Lazy-load any persisted drill descendants so previously-created drill
@@ -1743,20 +1820,45 @@ $('backBtn').addEventListener('click', () => {
 });
 
 $('resetBtn').addEventListener('click', () => {
-  if (!state.loading) {
-    state.pages = []; state.currentIndex = -1; state.pendingClick = null; state.drillMode = false; state.activeDrillByParent = {};
-    localStorage.removeItem(SESSION_KEY);
-    $('topicInput').value = '';
-    $('topicInput').focus();
-    renderCurrentPage(); updateUI(); clearError();
-  }
+  if (state.loading) return;
+  if (state.pages.length > 3 && !confirm(`Start a new session? Your current session has ${state.pages.length} pages and will be cleared.`)) return;
+  state.pages = []; state.currentIndex = -1; state.pendingClick = null; state.drillMode = false; state.activeDrillByParent = {};
+  localStorage.removeItem(SESSION_KEY);
+  $('topicInput').value = '';
+  $('topicInput').focus();
+  renderCurrentPage(); updateUI(); clearError();
 });
 
 $('uploadBtn').addEventListener('click', () => { if (!state.loading) $('fileInput').click(); });
 $('fileInput').addEventListener('change', (e) => { if (e.target.files[0]) { uploadImage(e.target.files[0]); e.target.value = ''; } });
-$('globalLanguageInput').addEventListener('input', (e) => {
-  state.language = e.target.value.trim();
-  saveSession();
+
+// Mode selector — change writes back to state.mode and persists via session
+$('modeSelect').addEventListener('change', (e) => {
+  state.mode = e.target.value || 'auto';
+  if ($('topicInput')) {
+    $('topicInput').placeholder = state.mode === 'auto'
+      ? 'Type a topic to illustrate...'
+      : (currentModeConfig().placeholder || 'Type a topic to illustrate...');
+  }
+});
+
+// Empty-state interactions — delegated to canvasArea so they survive re-renders
+$('canvasArea').addEventListener('click', (e) => {
+  if (state.loading) return;
+  const action = e.target.closest('[data-empty-action]')?.dataset.emptyAction;
+  if (action === 'focus-input') { $('topicInput').focus(); return; }
+  if (action === 'upload') { $('fileInput').click(); return; }
+  const chip = e.target.closest('.example-chip');
+  if (chip) {
+    const topic = chip.dataset.topic || chip.textContent.trim();
+    const presetMode = chip.dataset.mode;
+    if (presetMode && $('modeSelect') && [...$('modeSelect').options].some(o => o.value === presetMode)) {
+      state.mode = presetMode;
+      $('modeSelect').value = presetMode;
+    }
+    $('topicInput').value = topic;
+    $('topicForm').requestSubmit();
+  }
 });
 
 $('learnBtn').addEventListener('click', openLearn);
@@ -1777,7 +1879,7 @@ $('settingsBtn').addEventListener('click', openSettings);
 $('settingsClose').addEventListener('click', () => closePanel('settings'));
 $('settingsOverlay').addEventListener('click', () => closePanel('settings'));
 
-loadModes().then(restoreSession).finally(updateUI);
+loadModes().then(restoreSession).finally(() => { renderCurrentPage(); updateUI(); });
 </script>
 </body>
 </html>
