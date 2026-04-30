@@ -402,6 +402,43 @@ export async function classifyImage(imageBase64, analyzeFn, modelName = 'gemma-4
   return norm.payload;
 }
 
+// Phase D: style presets. When the classifier picks a non-default preset for
+// a parent image, the drill image generation uses one of these templates as
+// the BASE style instead of the mode's stock watercolor look. Each preset is
+// concrete enough that the image model can act on it without further hints.
+//
+// "match" is the special preset where we use the classifier's verbatim
+// style.descriptor (no canned template) — the call site builds the string
+// from parent.style.descriptor + palette_hint directly.
+export const STYLE_PRESETS = {
+  schematic:    `Style: technical schematic. Clean black ink lines on a near-white background, monochrome or restrained two-color palette, sans-serif labels at consistent size, geometric where applicable, no decorative shading or painterly texture, axes/ticks rendered with engineering precision.`,
+  poster:       `Style: flat-color poster. Bold display typography, high contrast, large unmodulated color fields, vector-style with no painterly texture, geometric shapes, restrained 2-4 color palette, strong visual hierarchy with the headline dominant.`,
+  illustrated:  `Style: hand-illustrated educational illustration. Clean dark ink outlines with consistent thin line weight, soft watercolor washes in a gentle pastel palette, light shading, no photorealism, friendly didactic feel.`,
+  photographic: `Style: photorealistic. Natural lighting, true-to-life materials and surface texture, accurate proportions, no stylized line work or flat color regions, no overlaid icons or labels unless present in the source.`,
+  manuscript:   `Style: page from a printed reference book. Cream/beige paper background with subtle grain, serif typography for any labels, thin rule lines, occasional small ink illustrations, restrained palette, no bold or saturated colors.`,
+};
+
+// Resolve the style instruction for a child image generation. When parent has
+// no classification (or fallback), returns null so caller falls back to the
+// mode's stock style. Otherwise returns a concrete style string built from the
+// preset (or the descriptor verbatim for "match").
+export function resolveStyleFromClassified(classified) {
+  if (!classified || classified.fallback_used) return null;
+  const preset = classified.style?.preset;
+  const descriptor = (classified.style?.descriptor || '').trim();
+  const palette = Array.isArray(classified.style?.palette_hint) ? classified.style.palette_hint.filter(Boolean) : [];
+  if (preset === 'match' && descriptor) {
+    const paletteLine = palette.length ? `\nPalette: ${palette.join(', ')}.` : '';
+    return `Style (match the parent image): ${descriptor}${paletteLine}`;
+  }
+  if (preset && STYLE_PRESETS[preset]) {
+    const descriptorLine = descriptor ? `\nObserved style cues from parent: ${descriptor}` : '';
+    const paletteLine = palette.length ? `\nObserved palette: ${palette.join(', ')}` : '';
+    return `${STYLE_PRESETS[preset]}${descriptorLine}${paletteLine}`;
+  }
+  return null;
+}
+
 // Build a context block for downstream image-generation prompts. The caller
 // (image-gen flow) decides whether to prepend this to the user prompt.
 // Returns an empty string if the classification is missing or fallback.

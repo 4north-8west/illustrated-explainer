@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
-import { classifyImage, buildGenerationContext } from './analysis/classify.js';
+import { classifyImage, buildGenerationContext, resolveStyleFromClassified } from './analysis/classify.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -646,14 +646,24 @@ async function generateChildPage(compositedImageBuffer, mode, intent = '', conte
     ? `\n\nLearner intent for this drill-down: ${intent}\nUse that intent to decide what details to reveal while still focusing on the marked region.`
     : '';
   const sourcePrompt = uploadContextPrompt(uploadContext, 2500);
-  // Phase A.2: when the parent image was classified, inject its classified
-  // payload as additional generation context. The model uses category-specific
-  // facts (e.g. chart axes, flyer dates, diagram subject) and the style
-  // descriptor to produce a child image that matches the parent's content
-  // and visual style instead of defaulting to the mode's stock watercolor look.
+  // Phase D: when the parent has a classified style preset, use it as the BASE
+  // style for the drill child instead of the mode's stock template. Falls back
+  // to the mode's style when classification is absent or the preset is unknown.
+  // This is the lever that stops every drill from coming back as watercolor
+  // when the parent is, say, a flat-color poster or a technical schematic.
+  const styleFromClassified = resolveStyleFromClassified(parentClassified);
+  const styleForPrompt = styleFromClassified || modeConfig.style;
+
+  // Phase A.2: append the parent's classified payload as additional context
+  // (category-specific facts: chart axes, flyer dates, diagram components, etc.).
   const parentCtx = buildGenerationContext(parentClassified);
-  const parentCtxBlock = parentCtx ? `\n\n${parentCtx}\n\nMatch the parent's visual style above when generating this child image.` : '';
-  const prompt = renderTemplate(modeConfig.childPageTemplate, { style: modeConfig.style }) + intentPrompt + sourcePrompt + parentCtxBlock;
+  // We've already swapped the style template above, so the framing changes
+  // from "match the parent" to "this is what the parent shows" — content reuse
+  // without re-stating the style command twice.
+  const parentCtxBlock = parentCtx
+    ? `\n\n${parentCtx}\n\nUse this context to decide what to draw; the style instructions above already match the parent.`
+    : '';
+  const prompt = renderTemplate(modeConfig.childPageTemplate, { style: styleForPrompt }) + intentPrompt + sourcePrompt + parentCtxBlock;
   return callEditing(prompt, compositedImageBuffer);
 }
 
