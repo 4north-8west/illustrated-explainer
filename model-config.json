@@ -4,12 +4,21 @@
     "provider": "openai",
     "model": "gpt-image-2"
   },
-  "editing": {
-    "provider": "openai",
-    "model": "gpt-image-2"
+  "classify": {
+    "provider": "local",
+    "model": "auto"
   },
   "analysis": {
     "provider": "local",
     "model": "gemma-4-E4B"
-  }
+  },
+  "editing": {
+    "provider": "openai",
+    "model": "gpt-image-2"
+  },
+  "drillText": {
+    "provider": "local",
+    "model": "auto"
+  },
+  "allowClassifyCloudFallback": false
 }

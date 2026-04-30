@@ -49,13 +49,15 @@ let pageMeta = loadMetadata();
 
 const DEFAULT_MODEL_CONFIG = {
   localOnly: false,
-  generation: { provider: 'xai', model: 'grok-imagine-image' },
-  editing: { provider: 'xai', model: 'grok-imagine-image' },
-  analysis: { provider: 'local', model: 'auto' },
-  // Classification (Phase A): runs on every uploaded/generated image.
-  // Distinct from analysis so users can pin a different model. Local-only
-  // by default — cloud fallback requires explicit opt-in below.
-  classify: { provider: 'local', model: 'auto' },
+  // ── Initial run ─────────────────────────────────────────────────────
+  generation: { provider: 'xai', model: 'grok-imagine-image' },   // first-page IMAGE generation
+  classify:   { provider: 'local', model: 'auto' },               // upload-time / generated-image classification (Phase A)
+  // ── Subsequent information ──────────────────────────────────────────
+  analysis:   { provider: 'local', model: 'auto' },               // Learn-panel description + explanation
+  // ── Drill in ────────────────────────────────────────────────────────
+  editing:    { provider: 'xai', model: 'grok-imagine-image' },   // drill IMAGE generation
+  drillText:  { provider: 'local', model: 'auto' },               // drill TEXT generation (markdown / chart / table / diagram)
+  // ── Cloud-fallback policy ───────────────────────────────────────────
   allowClassifyCloudFallback: false,
 };
 
@@ -113,17 +115,37 @@ const MODEL_REGISTRY = {
     authHeader: () => null,
   },
   local: {
+    // Each model entry can specify its own chatUrl to target a specific
+    // llama-server port — useful when running multiple llama-server instances
+    // (e.g. one model per port). When chatUrl is omitted, the provider-level
+    // LLAMA_SERVER_URL is used.
     name: 'Local (llama-server)',
     models: {
-      'auto': { name: 'Auto-detect (whatever is running)', capabilities: ['analysis'] },
-      'gemma-4-E2B': { name: 'Gemma 4 E2B (Tiny, 2B)', capabilities: ['analysis'] },
-      'gemma-4-E4B': { name: 'Gemma 4 E4B (Small, 4B)', capabilities: ['analysis'] },
-      'gemma-4-26B': { name: 'Gemma 4 26B (Medium, MoE)', capabilities: ['analysis'] },
+      'auto':                        { name: 'Auto-detect (whatever 8080 has loaded)', capabilities: ['analysis', 'classify', 'drillText'] },
+      'gemma-4-E2B':                 { name: 'Gemma 4 E2B  · 2B vision · fastest, lower quality', capabilities: ['analysis', 'classify', 'drillText'] },
+      'gemma-4-E4B':                 { name: 'Gemma 4 E4B  · 4B vision · balanced', capabilities: ['analysis', 'classify', 'drillText'] },
+      'gemma-4-E4B-it-Q4_K_S':       { name: 'Gemma 4 E4B Q4_K_S  · 4B vision · current 8080 default', capabilities: ['analysis', 'classify', 'drillText'] },
+      'gemma-4-26B':                 { name: 'Gemma 4 26B  · MoE vision · medium', capabilities: ['analysis', 'classify', 'drillText'], chatUrl: 'http://localhost:8082/v1/chat/completions' },
+      'gemma-4-26B-A4B-APEX-I-Mini': { name: 'Gemma 4 26B-A4B APEX  · MoE vision · medium variant', capabilities: ['analysis', 'classify', 'drillText'], chatUrl: 'http://localhost:8082/v1/chat/completions' },
+      'gemma-4-31B':                 { name: 'Gemma 4 31B  · vision · highest quality, slowest', capabilities: ['analysis', 'classify', 'drillText'], chatUrl: 'http://localhost:8083/v1/chat/completions' },
+      'GLM-OCR':                     { name: 'GLM-OCR  · vision · OCR specialist', capabilities: ['analysis', 'classify'], chatUrl: 'http://localhost:8084/v1/chat/completions' },
+      'olmOCR-2-7B-1025':            { name: 'olmOCR-2 7B  · vision · OCR specialist', capabilities: ['analysis', 'classify'], chatUrl: 'http://localhost:8085/v1/chat/completions' },
     },
     chatUrl: LLAMA_SERVER_URL + '/v1/chat/completions',
     authHeader: () => null,
   },
 };
+
+// Resolve the chat endpoint for a given provider/model — uses the model-level
+// chatUrl override when present, falls back to the provider's chatUrl. Lets
+// users target different llama-server ports per pipeline (e.g. classify on
+// the 4B server, analysis on the 26B server).
+function resolveChatUrl(provider, model) {
+  const providerConfig = MODEL_REGISTRY[provider];
+  if (!providerConfig) return null;
+  const modelConfigEntry = providerConfig.models?.[model];
+  return modelConfigEntry?.chatUrl || providerConfig.chatUrl || null;
+}
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -755,7 +777,7 @@ Respond with a focused Markdown learning page:
 - Mention uncertainty explicitly if the image does not provide enough information.
 - Do not explain unrelated areas of the image.`;
 
-  const cfg = modelConfig.analysis;
+  const cfg = modelConfig.drillText;  // drill text
   try {
     const text = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
     return { text, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
@@ -976,7 +998,7 @@ Rules:
 - Every point must include evidence and confidence.
 - Do not invent precision. Prefer simple approximate values and clear uncertainty.`;
 
-  const cfg = modelConfig.analysis;
+  const cfg = modelConfig.drillText;  // drill chart
   let result;
   let usedFallback = false;
   try {
@@ -1063,7 +1085,7 @@ Rules:
 - Use 2-8 columns and 2-40 rows.
 - Do not invent precise source text. If text is unclear, mark it as uncertain.`;
 
-  const cfg = modelConfig.analysis;
+  const cfg = modelConfig.drillText;  // drill table
   let result;
   try {
     result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
@@ -1127,7 +1149,7 @@ Rules:
 - Use 2-12 nodes unless the selected region clearly needs more.
 - Keep labels short enough to render inside boxes.`;
 
-  const cfg = modelConfig.analysis;
+  const cfg = modelConfig.drillText;  // drill diagram
   let result;
   try {
     result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
@@ -1167,9 +1189,16 @@ app.get('/api/models', (_req, res) => {
 });
 
 app.post('/api/models', (req, res) => {
-  const { generation, editing, analysis, localOnly } = req.body;
+  const { generation, editing, analysis, classify, drillText, localOnly, allowClassifyCloudFallback } = req.body;
   if (typeof localOnly === 'boolean') modelConfig.localOnly = localOnly;
-  for (const [key, val] of [['generation', generation], ['editing', editing], ['analysis', analysis]]) {
+  if (typeof allowClassifyCloudFallback === 'boolean') modelConfig.allowClassifyCloudFallback = allowClassifyCloudFallback;
+  for (const [key, val] of [
+    ['generation', generation],
+    ['editing', editing],
+    ['analysis', analysis],
+    ['classify', classify],
+    ['drillText', drillText],
+  ]) {
     if (val) {
       if (!MODEL_REGISTRY[val.provider]?.models[val.model]) {
         return res.status(400).json({ error: `Unknown model: ${val.provider}/${val.model}` });
@@ -1364,11 +1393,12 @@ async function callTextChat(provider, model, systemPrompt, userPrompt) {
     return textParts.map(p => p.text).join('\n');
   }
 
-  if (!providerConfig?.chatUrl) throw new Error(`No chat URL for provider: ${provider}`);
+  const chatUrl = resolveChatUrl(provider, model);
+  if (!chatUrl) throw new Error(`No chat URL for provider: ${provider}`);
   const headers = { 'Content-Type': 'application/json' };
   const auth = providerConfig.authHeader();
   if (auth) headers['Authorization'] = auth;
-  const response = await fetch(providerConfig.chatUrl, {
+  const response = await fetch(chatUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -1833,13 +1863,14 @@ async function callVisionChat(provider, model, imageBase64, systemPrompt, userPr
   }
 
   // OpenAI / xAI / local — all use OpenAI-compatible chat format
-  if (!providerConfig?.chatUrl) throw new Error(`No chat URL for provider: ${provider}`);
+  const chatUrl = resolveChatUrl(provider, model);
+  if (!chatUrl) throw new Error(`No chat URL for provider: ${provider}`);
 
   const headers = { 'Content-Type': 'application/json' };
   const auth = providerConfig.authHeader();
   if (auth) headers['Authorization'] = auth;
 
-  const response = await fetch(providerConfig.chatUrl, {
+  const response = await fetch(chatUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify({

@@ -263,6 +263,8 @@
   .setting-group .desc { font-size: 11px; color: #999; margin-bottom: 8px; }
   .setting-select { width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-family: inherit; font-size: 13px; background: #fff; }
   .setting-current { font-size: 11px; color: #888; font-family: monospace; margin-top: 4px; }
+  .settings-section-h { font-size: 11px; font-weight: 700; color: #6b5a3e; letter-spacing: 0.08em; text-transform: uppercase; margin: 22px 0 10px; padding-bottom: 4px; border-bottom: 1px solid #e8e4df; }
+  .settings-section-h:first-of-type { margin-top: 14px; }
   .setting-group label.setting-checkbox { display: flex; gap: 9px; align-items: flex-start; padding: 10px 12px; border: 1px solid #e0dcd7; border-radius: 6px; background: #fff; margin-bottom: 0; }
   .setting-checkbox input { margin-top: 2px; }
   .setting-checkbox span { display: block; font-size: 13px; font-weight: 600; color: #444; }
@@ -1841,27 +1843,52 @@ async function openSettings() {
             <small>Blocks cloud model calls. Image generation and image drill-ins will stay disabled until a local image model is configured.</small>
           </span>
         </label>
+        <label class="setting-checkbox" style="margin-top:8px">
+          <input type="checkbox" id="classifyCloudToggle" ${current.allowClassifyCloudFallback ? 'checked' : ''}>
+          <span>Allow cloud fallback for classification
+            <small>Off by default. When unchecked, classification fails closed if the local model is unreachable. When checked, falls back to Grok 4.1 Fast.</small>
+          </span>
+        </label>
       </div>
+
+      <h3 class="settings-section-h">Initial run</h3>
       <div class="setting-group">
-        <label>Image Generation Model</label>
-        <p class="desc">Used when generating the first page from a text prompt.</p>
+        <label>First-page image generation</label>
+        <p class="desc">Used when the user types a topic and we generate the first page image.</p>
         <select class="setting-select" id="genModelSelect">${optionsFor('generation')}</select>
         <p class="setting-current">Current: ${current.generation.provider}/${current.generation.model}</p>
       </div>
       <div class="setting-group">
-        <label>Image Editing Model</label>
-        <p class="desc">Used when drilling into an existing image (image + prompt → new image).</p>
+        <label>Classification (auto on upload &amp; generation)</label>
+        <p class="desc">Runs in the background on every new image. Drives the drill-in suggestions, intent chips, and the style passed into drill children. Single-pass structured output — keep on a fast vision model.</p>
+        <select class="setting-select" id="classifyModelSelect">${optionsFor('classify')}</select>
+        <p class="setting-current">Current: ${current.classify.provider}/${current.classify.model}</p>
+      </div>
+
+      <h3 class="settings-section-h">Subsequent information</h3>
+      <div class="setting-group">
+        <label>Learn-panel analysis (description &amp; concepts)</label>
+        <p class="desc">Used when the user clicks Learn — produces the longer description and concept explanation. Heavier prompts; benefits from a more capable vision model.</p>
+        <select class="setting-select" id="analysisModelSelect">${optionsFor('analysis')}</select>
+        <p class="setting-current">Current: ${current.analysis.provider}/${current.analysis.model}</p>
+      </div>
+
+      <h3 class="settings-section-h">Drill in</h3>
+      <div class="setting-group">
+        <label>Image drill (image &rarr; new image)</label>
+        <p class="desc">Used when the user drills with "Drill into image". Inherits parent's classified style descriptor when present.</p>
         <select class="setting-select" id="editModelSelect">${optionsFor('editing')}</select>
         <p class="setting-current">Current: ${current.editing.provider}/${current.editing.model}</p>
       </div>
       <div class="setting-group">
-        <label>Image Analysis Model</label>
-        <p class="desc">Used by Learn, context, translation, and text/chart responses. When Keep it local is enabled, cloud fallback is disabled.</p>
-        <select class="setting-select" id="analysisModelSelect">${optionsFor('analysis')}</select>
-        <p class="setting-current">Current: ${current.analysis.provider}/${current.analysis.model}</p>
+        <label>Text drill (markdown / chart / table / diagram)</label>
+        <p class="desc">Used when the user drills with one of the text formats. Distinct from Learn-panel analysis so you can tune them independently — e.g. a smarter model here for nuanced explanations, a faster one for Learn.</p>
+        <select class="setting-select" id="drillTextModelSelect">${optionsFor('drillText')}</select>
+        <p class="setting-current">Current: ${current.drillText.provider}/${current.drillText.model}</p>
       </div>
+
       <div class="setting-group">
-        <p class="desc">To add new providers (Gemini, OpenAI, etc.), add them to MODEL_REGISTRY in server.js and set the corresponding API key in .env.</p>
+        <p class="desc"><strong>Local models with port overrides:</strong> the local registry in server.js can pin individual models to specific llama-server ports (e.g. 8080 for the small Gemma, 8082 for the medium 26B, 8083 for the 31B). Edit MODEL_REGISTRY.local in server.js to add or change ports.</p>
       </div>
       <button class="save-settings-btn" id="saveSettingsBtn">Save</button>
     `;
@@ -1869,6 +1896,8 @@ async function openSettings() {
     $('genModelSelect').value = `${current.generation.provider}/${current.generation.model}`;
     $('editModelSelect').value = `${current.editing.provider}/${current.editing.model}`;
     $('analysisModelSelect').value = `${current.analysis.provider}/${current.analysis.model}`;
+    $('classifyModelSelect').value = `${current.classify.provider}/${current.classify.model}`;
+    $('drillTextModelSelect').value = `${current.drillText.provider}/${current.drillText.model}`;
     $('localOnlyToggle').onchange = async () => {
       const r = await fetch('/api/models', {
         method: 'POST',
@@ -1881,18 +1910,31 @@ async function openSettings() {
         $('localOnlyToggle').checked = !$('localOnlyToggle').checked;
       }
     };
+    $('classifyCloudToggle').onchange = async () => {
+      const r = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowClassifyCloudFallback: $('classifyCloudToggle').checked }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        showError(d.error || 'Could not save classify cloud-fallback setting');
+        $('classifyCloudToggle').checked = !$('classifyCloudToggle').checked;
+      }
+    };
 
     $('saveSettingsBtn').onclick = async () => {
-      const [gProv, gModel] = $('genModelSelect').value.split('/');
-      const [eProv, eModel] = $('editModelSelect').value.split('/');
-      const [aProv, aModel] = $('analysisModelSelect').value.split('/');
+      const split = id => { const [p, m] = $(id).value.split('/'); return { provider: p, model: m }; };
       const r = await fetch('/api/models', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          generation: { provider: gProv, model: gModel },
-          editing: { provider: eProv, model: eModel },
-          analysis: { provider: aProv, model: aModel },
-          localOnly: $('localOnlyToggle').checked,
+          generation: split('genModelSelect'),
+          editing:    split('editModelSelect'),
+          analysis:   split('analysisModelSelect'),
+          classify:   split('classifyModelSelect'),
+          drillText:  split('drillTextModelSelect'),
+          localOnly:  $('localOnlyToggle').checked,
+          allowClassifyCloudFallback: $('classifyCloudToggle').checked,
         }),
       });
       if (r.ok) { closePanel('settings'); } else { const d = await r.json(); showError(d.error); }
