@@ -7,3 +7,4 @@ demos/*/.venv/
 demos/*/extraction.jsonl
 demos/*/visualization.html
 demos/*/__pycache__/
+logs/
