@@ -1,0 +1,278 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "illustrated-explainer/classify-schema/v1",
+  "title": "Classified image payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "category",
+    "category_confidence",
+    "style",
+    "transcript",
+    "visual_summary",
+    "drill_hints"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "classified_at": { "type": "string" },
+    "model": { "type": "string" },
+    "fallback_used": { "type": "boolean" },
+    "fallback_reason": { "type": ["string", "null"] },
+
+    "category": {
+      "type": "string",
+      "enum": ["chart", "event_flyer", "diagram", "general"]
+    },
+    "category_confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "category_rationale": {
+      "type": "string",
+      "maxLength": 600
+    },
+
+    "style": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preset", "descriptor"],
+      "properties": {
+        "preset": {
+          "type": "string",
+          "enum": ["schematic", "poster", "illustrated", "photographic", "manuscript", "match"]
+        },
+        "descriptor": { "type": "string", "maxLength": 400 },
+        "palette_hint": {
+          "type": ["array", "null"],
+          "items": { "type": "string", "maxLength": 32 },
+          "maxItems": 5
+        }
+      }
+    },
+
+    "transcript": { "type": "string" },
+    "visual_summary": { "type": "string", "maxLength": 1200 },
+
+    "drill_hints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suggested_default", "suggested_default_label", "suggested_intents", "regions_of_interest"],
+      "properties": {
+        "suggested_default": {
+          "type": "string",
+          "enum": ["image", "markdown", "chart", "table", "diagram"]
+        },
+        "suggested_default_label": { "type": "string", "maxLength": 80 },
+        "suggested_intents": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 200 },
+          "minItems": 0,
+          "maxItems": 6
+        },
+        "regions_of_interest": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "rationale"],
+            "properties": {
+              "label": { "type": "string", "maxLength": 120 },
+              "rationale": { "type": "string", "maxLength": 200 }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 8
+        }
+      }
+    },
+
+    "chart": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "chart_type": {
+          "type": "string",
+          "enum": ["bar", "line", "scatter", "pie", "area", "other"]
+        },
+        "title": { "type": ["string", "null"], "maxLength": 200 },
+        "x_axis": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "label": { "type": ["string", "null"], "maxLength": 100 },
+            "unit":  { "type": ["string", "null"], "maxLength": 60 }
+          }
+        },
+        "y_axis": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "label": { "type": ["string", "null"], "maxLength": 100 },
+            "unit":  { "type": ["string", "null"], "maxLength": 60 }
+          }
+        },
+        "series": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "points"],
+            "properties": {
+              "name": { "type": "string", "maxLength": 100 },
+              "points": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["x", "y"],
+                  "properties": {
+                    "x": { "type": ["string", "number", "null"] },
+                    "y": { "type": ["string", "number", "null"] }
+                  }
+                },
+                "maxItems": 200
+              }
+            }
+          },
+          "maxItems": 20
+        },
+        "takeaway": { "type": ["string", "null"], "maxLength": 400 },
+        "uncertainty_notes": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 200 },
+          "maxItems": 10
+        }
+      }
+    },
+
+    "event_flyer": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": ["string", "null"], "maxLength": 200 },
+        "tagline": { "type": ["string", "null"], "maxLength": 300 },
+        "dates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "starts": { "type": ["string", "null"] },
+              "ends":   { "type": ["string", "null"] },
+              "label_raw": { "type": "string", "maxLength": 200 }
+            },
+            "required": ["label_raw"]
+          },
+          "maxItems": 10
+        },
+        "location": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "venue":   { "type": ["string", "null"], "maxLength": 200 },
+            "address": { "type": ["string", "null"], "maxLength": 300 }
+          }
+        },
+        "cost": { "type": ["string", "null"], "maxLength": 200 },
+        "audience": { "type": ["string", "null"], "maxLength": 200 },
+        "register_by": { "type": ["string", "null"] },
+        "contact": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "email":   { "type": ["string", "null"], "maxLength": 200 },
+            "phone":   { "type": ["string", "null"], "maxLength": 60 },
+            "website": { "type": ["string", "null"], "maxLength": 300 }
+          }
+        },
+        "organizer": { "type": ["string", "null"], "maxLength": 200 },
+        "key_calls_to_action": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 200 },
+          "maxItems": 6
+        }
+      }
+    },
+
+    "diagram": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "diagram_type": {
+          "type": "string",
+          "enum": ["flowchart", "schematic", "anatomy", "organizational", "process", "other"]
+        },
+        "subject": { "type": ["string", "null"], "maxLength": 300 },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label"],
+            "properties": {
+              "label": { "type": "string", "maxLength": 120 },
+              "role": {
+                "type": ["string", "null"],
+                "enum": ["input", "process", "output", "container", "annotation", "other", null]
+              },
+              "description": { "type": ["string", "null"], "maxLength": 300 }
+            }
+          },
+          "maxItems": 30
+        },
+        "relationships": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from", "to"],
+            "properties": {
+              "from": { "type": "string", "maxLength": 120 },
+              "to":   { "type": "string", "maxLength": 120 },
+              "kind": {
+                "type": ["string", "null"],
+                "enum": ["flows-to", "contains", "depends-on", "labels", "other", null]
+              },
+              "description": { "type": ["string", "null"], "maxLength": 200 }
+            }
+          },
+          "maxItems": 50
+        },
+        "process_steps": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["step", "summary"],
+            "properties": {
+              "step":    { "type": "integer", "minimum": 1 },
+              "summary": { "type": "string", "maxLength": 300 }
+            }
+          },
+          "maxItems": 30
+        }
+      }
+    },
+
+    "general": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "subjects": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 120 },
+          "maxItems": 10
+        },
+        "setting": { "type": ["string", "null"], "maxLength": 300 },
+        "notable_details": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 200 },
+          "maxItems": 10
+        },
+        "likely_purpose": { "type": ["string", "null"], "maxLength": 300 }
+      }
+    }
+  }
+}

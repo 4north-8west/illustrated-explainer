@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { classifyImage, buildGenerationContext } from './analysis/classify.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -51,6 +52,11 @@ const DEFAULT_MODEL_CONFIG = {
   generation: { provider: 'xai', model: 'grok-imagine-image' },
   editing: { provider: 'xai', model: 'grok-imagine-image' },
   analysis: { provider: 'local', model: 'auto' },
+  // Classification (Phase A): runs on every uploaded/generated image.
+  // Distinct from analysis so users can pin a different model. Local-only
+  // by default — cloud fallback requires explicit opt-in below.
+  classify: { provider: 'local', model: 'auto' },
+  allowClassifyCloudFallback: false,
 };
 
 function loadModelConfig() {
@@ -1188,6 +1194,10 @@ app.post('/api/upload', async (req, res) => {
 
     console.log(`[upload] Saved: ${imagePath} (${pngBuffer.length} bytes)`);
 
+    // Fire-and-forget classification. The user gets the page back immediately;
+    // the classified payload becomes available shortly after via GET /api/classify/:pageId.
+    enqueueClassify(id);
+
     res.json({
       page: {
         id,
@@ -1832,6 +1842,85 @@ async function analyzeImage(imageBase64, systemPrompt, userPrompt) {
   }
 }
 
+// Classification-specific vision call. Distinct from analyzeImage because:
+// 1. Uses modelConfig.classify (separately pinnable model — defaults to local Gemma).
+// 2. Cloud fallback is gated by the explicit modelConfig.allowClassifyCloudFallback
+//    flag, NOT by modelConfig.localOnly. This keeps classification local-by-default
+//    even when the user has enabled cloud fallback for analysis.
+async function analyzeImageForClassify(systemPrompt, userPrompt, imageBase64) {
+  const cfg = modelConfig.classify || { provider: 'local', model: 'auto' };
+  const sourceName = cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`;
+  try {
+    const text = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
+    return { text, source: sourceName };
+  } catch (err) {
+    const isLocalOutage = cfg.provider === 'local'
+      && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'));
+    if (isLocalOutage && modelConfig.allowClassifyCloudFallback === true) {
+      console.log(`[classify] Local model unavailable (${err.message}); cloud fallback authorized — calling Grok.`);
+      const text = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
+      return { text, source: 'grok (fallback)' };
+    }
+    throw err;
+  }
+}
+
+// Background classify runner. Fire-and-forget from upload / generation paths;
+// errors are logged but never block the caller. Result lands in
+// _analysis/<pageId>.json under the .classified field, alongside the existing
+// description/explanation fields (which are unaffected).
+const classifyInFlight = new Map(); // pageId -> Promise (deduplicates concurrent triggers)
+
+async function runClassifyForPage(pageId) {
+  const meta = pageMeta[pageId];
+  if (!meta || meta.type !== 'image') return null;
+  const imagePath = path.join(GENERATED_DIR, meta.folder, `${pageId}.png`);
+  if (!fs.existsSync(imagePath)) {
+    console.warn(`[classify] ${pageId}: image file not found at ${imagePath}`);
+    return null;
+  }
+  const buf = fs.readFileSync(imagePath);
+  const imageBase64 = buf.toString('base64');
+  const modelName = (modelConfig.classify?.model && modelConfig.classify.model !== 'auto')
+    ? modelConfig.classify.model
+    : 'gemma-4-E4B';
+
+  const started = Date.now();
+  const payload = await classifyImage(imageBase64, analyzeImageForClassify, modelName);
+  const elapsed = Date.now() - started;
+
+  const existing = loadAnalysis(pageId) || {};
+  existing.classified = payload;
+  existing.classifiedAt = payload.classified_at;
+  saveAnalysis(pageId, existing);
+
+  if (payload.fallback_used) {
+    console.warn(`[classify] ${pageId}: ${elapsed}ms — FALLBACK (${payload.fallback_reason})`);
+    // Surface the most common configuration issue with a concrete remediation hint.
+    if (payload.fallback_reason && payload.fallback_reason.includes('exceed_context_size_error')) {
+      console.warn('[classify] >>> Local llama-server slot is too small for the classify prompt.');
+      console.warn('[classify] >>> Suggested fix: restart llama-server with reduced concurrency,');
+      console.warn('[classify] >>>   e.g. -c 32768 -np 4   (gives 8192 tokens per slot)');
+      console.warn('[classify] >>>   or   -c 65536 -np 8   (gives 8192 tokens per slot)');
+    }
+  } else {
+    console.log(`[classify] ${pageId}: ${elapsed}ms — ${payload.category} (conf ${payload.category_confidence.toFixed(2)})`);
+  }
+  return payload;
+}
+
+function enqueueClassify(pageId) {
+  if (classifyInFlight.has(pageId)) return classifyInFlight.get(pageId);
+  const p = runClassifyForPage(pageId)
+    .catch(err => {
+      console.error(`[classify] ${pageId} failed:`, err.message);
+      return null;
+    })
+    .finally(() => classifyInFlight.delete(pageId));
+  classifyInFlight.set(pageId, p);
+  return p;
+}
+
 const DESCRIPTION_SYSTEM = `You are an image analyst. Describe images thoroughly and accurately. Include ALL visible text exactly as it appears.`;
 
 const DESCRIPTION_PROMPT = `Analyze this image and provide a comprehensive description.
@@ -1879,6 +1968,40 @@ app.get('/api/analysis/:pageId', (req, res) => {
   const cached = loadAnalysis(pageId);
   if (cached) return res.json(cached);
   res.json({ description: null, explanation: null });
+});
+
+// --- Classify (Phase A) ---
+// GET returns the cached classified payload (or null + a status flag if a
+// classify pass is currently running in the background).
+// POST forces a re-classify even if one is cached.
+app.get('/api/classify/:pageId', (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) return res.status(400).json({ error: 'Invalid page ID' });
+  const cached = loadAnalysis(pageId);
+  res.json({
+    classified: cached?.classified || null,
+    inFlight: classifyInFlight.has(pageId),
+  });
+});
+
+app.post('/api/classify/:pageId', async (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) return res.status(400).json({ error: 'Invalid page ID' });
+  const meta = pageMeta[pageId];
+  if (!meta) return res.status(404).json({ error: 'Page not found' });
+  if (meta.type !== 'image') return res.status(400).json({ error: 'Only image pages can be classified' });
+  const force = req.body?.force === true;
+  if (!force) {
+    const cached = loadAnalysis(pageId);
+    if (cached?.classified) return res.json({ classified: cached.classified, cached: true });
+  }
+  try {
+    const payload = await enqueueClassify(pageId);
+    if (!payload) return res.status(500).json({ error: 'Classification produced no result (see server logs).' });
+    res.json({ classified: payload, cached: false });
+  } catch (err) {
+    res.status(500).json({ error: `Classification failed: ${err.message}` });
+  }
 });
 
 app.post('/api/analysis/:pageId', async (req, res) => {
