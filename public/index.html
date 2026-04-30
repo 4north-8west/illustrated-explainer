@@ -116,6 +116,16 @@
   .card-table tbody tr:hover { background: #faf8f5; }
   .hint-label { font-size: 11px; color: #999; margin: 0 0 4px; }
   .intent-chip-row.preview { padding: 0; }
+  /* Skeleton placeholders — shown in the 3-col side panels while classification is pending */
+  @keyframes shimmer-bg { 0% { background-position: -300px 0; } 100% { background-position: 300px 0; } }
+  .skeleton-block { background: linear-gradient(90deg, #ece6de 0%, #f5f0e8 50%, #ece6de 100%); background-size: 600px 100%; animation: shimmer-bg 1.6s linear infinite; border-radius: 3px; }
+  .skeleton-bar { height: 10px; margin-bottom: 7px; }
+  .skeleton-bar.w-100 { width: 100%; }
+  .skeleton-bar.w-85  { width: 85%; }
+  .skeleton-bar.w-70  { width: 70%; }
+  .skeleton-bar.w-50  { width: 50%; }
+  .skeleton-bar.w-30  { width: 30%; }
+  .skeleton-msg { font-size: 11px; color: #aaa; font-style: italic; margin: 10px 0 0; text-align: center; }
   .source-panel .source-content { font-size: 13px; line-height: 1.55; color: #48433d; }
   .source-panel .source-content h1 { font-size: 16px; margin: 0 0 8px; }
   .source-panel .source-content h2 { font-size: 13px; margin: 12px 0 6px; border: 0; padding: 0; }
@@ -754,46 +764,65 @@ async function fetchSavedPage(pageId) {
 // The server still has any drill-down descendants on disk; pull them lazily so
 // the persistent drill-target markers reappear without forcing the user to
 // re-navigate. Dedup by pageId so we never refetch in the same tab.
-// Poll once for a freshly-completed classification on an image page that
-// rendered before its background classify pass finished. Bounded retry: up to
-// 10 attempts, every 5s (= ~50s total), then gives up. Only runs once per
-// pageId per session.
-const _classifyChecked = new Set();
+// Poll for a fresh classification on an image page that rendered before its
+// background classify pass finished. The state machine has three values:
+//
+//   'pending'     — polling, server says classify is in flight (or first poll
+//                   hasn't completed yet). Render path shows skeleton panels.
+//   'unavailable' — confirmed: no classification will arrive. Render path
+//                   falls back to single-column / no side panels.
+//   absent        — never tried. Initial state.
+//
+// On a successful arrival, the entry is removed (page.classified now carries
+// the slim subset) and a re-render swaps skeletons for real content.
+const _classifyState = new Map();
+
 function ensureClassifiedRefreshed(pageId) {
-  if (!pageId || _classifyChecked.has(pageId)) return;
-  _classifyChecked.add(pageId);
+  if (!pageId || _classifyState.has(pageId)) return;
+  // Optimistic: assume something is coming. The first GET will downgrade to
+  // 'unavailable' fast if the server isn't classifying this image.
+  _classifyState.set(pageId, 'pending');
+  if (state.pages[state.currentIndex]?.id === pageId) renderCurrentPage();
+
   let attempts = 0;
+  const finish = (newState, classified = null) => {
+    if (classified) {
+      const idx = state.pages.findIndex(p => p.id === pageId);
+      if (idx !== -1) {
+        state.pages[idx] = {
+          ...state.pages[idx],
+          classified: {
+            category: classified.category,
+            confidence: classified.category_confidence,
+            style_preset: classified.style?.preset || null,
+            drill_hints: classified.drill_hints || null,
+          },
+        };
+        saveSession();
+      }
+      _classifyState.delete(pageId); // page.classified now carries the signal
+    } else {
+      _classifyState.set(pageId, newState);
+    }
+    if (state.pages[state.currentIndex]?.id === pageId) renderCurrentPage();
+  };
+
   const tick = async () => {
     attempts++;
     try {
       const res = await fetch(`/api/classify/${pageId}`);
       if (res.ok) {
-        const { classified } = await res.json();
-        if (classified && !classified.fallback_used) {
-          // Patch state with the slim subset the page object carries
-          const idx = state.pages.findIndex(p => p.id === pageId);
-          if (idx !== -1) {
-            state.pages[idx] = {
-              ...state.pages[idx],
-              classified: {
-                category: classified.category,
-                confidence: classified.category_confidence,
-                style_preset: classified.style?.preset || null,
-                drill_hints: classified.drill_hints || null,
-              },
-            };
-            // Re-render only if the user is still viewing this page
-            if (state.pages[state.currentIndex]?.id === pageId) renderCurrentPage();
-            saveSession();
-          }
-          return; // done
-        }
+        const { classified, inFlight } = await res.json();
+        if (classified && !classified.fallback_used) return finish(null, classified);
+        // No classification yet. If the server isn't actively working on it,
+        // we won't get one — drop the skeleton fast.
+        if (!inFlight) return finish('unavailable');
       }
-    } catch { /* swallow; retry */ }
+    } catch { /* network blip — retry */ }
     if (attempts < 10) setTimeout(tick, 5000);
+    else finish('unavailable');
   };
-  // First check after 3s — gives the background classify a head start
-  setTimeout(tick, 3000);
+  setTimeout(tick, 1500); // first check fast so skeleton doesn't linger on never-classified images
 }
 
 const _descendantsFetched = new Set();
@@ -1093,6 +1122,48 @@ function renderGeneralCard(g) {
       ${g.setting ? `<p><strong>Setting:</strong> ${escapeHtml(g.setting)}</p>` : ''}
       ${details ? `<p><strong>Notable details:</strong></p><ul class="card-list">${details}</ul>` : ''}
       ${g.likely_purpose ? `<p><strong>Purpose:</strong> ${escapeHtml(g.likely_purpose)}</p>` : ''}
+    </div>
+  </section>`;
+}
+
+// Skeleton placeholders shown in the side panels while classification is in flight.
+function renderClassifiedLeftSkeleton() {
+  return `<section class="source-panel">
+    <h2>Visual summary</h2>
+    <div class="source-content">
+      <div class="skeleton-block skeleton-bar w-100"></div>
+      <div class="skeleton-block skeleton-bar w-100"></div>
+      <div class="skeleton-block skeleton-bar w-70"></div>
+    </div>
+  </section>
+  <section class="source-panel">
+    <h2>Transcript</h2>
+    <div class="source-content">
+      <div class="skeleton-block skeleton-bar w-85"></div>
+      <div class="skeleton-block skeleton-bar w-100"></div>
+      <div class="skeleton-block skeleton-bar w-50"></div>
+      <div class="skeleton-block skeleton-bar w-100"></div>
+      <div class="skeleton-block skeleton-bar w-30"></div>
+    </div>
+  </section>`;
+}
+
+function renderClassifiedRightSkeleton() {
+  return `<section class="source-panel">
+    <h2>Identifying...</h2>
+    <div class="source-content">
+      <div class="skeleton-block skeleton-bar w-50"></div>
+      <div class="skeleton-block skeleton-bar w-100"></div>
+      <div class="skeleton-block skeleton-bar w-85"></div>
+      <p class="skeleton-msg">Classifying image · ~30–60 seconds on the local model</p>
+    </div>
+  </section>
+  <section class="source-panel cat-card">
+    <h2>Drill suggestions</h2>
+    <div class="source-content">
+      <div class="skeleton-block skeleton-bar w-70"></div>
+      <div class="skeleton-block skeleton-bar w-50"></div>
+      <div class="skeleton-block skeleton-bar w-85"></div>
     </div>
   </section>`;
 }
@@ -1665,11 +1736,15 @@ function renderCurrentPage() {
   }
 
   const sourceContext = sourceContextCache[page.id];
-  // Phase B: render the 3-column layout when EITHER a source-context (uploaded
-  // image OCR pre-Phase A) OR a classified payload (Phase A) is available.
-  // Show the classified-derived panels alongside the existing accordions so
-  // upload-flow images surface both representations.
-  if (sourceContext?.content || fullClassified) {
+  // Render the 3-column layout when ANY of these is true:
+  //   - upload-context exists (legacy OCR-based pre-Phase A path)
+  //   - classified payload loaded (Phase A.3)
+  //   - classification is pending (skeleton state — Phase B polish)
+  // When pending, the side panels show shimmer placeholders so the
+  // transition into the populated layout is graceful instead of abrupt.
+  const classifyState = page.type === 'image' ? _classifyState.get(page.id) : null;
+  const isPending = classifyState === 'pending' && !fullClassified;
+  if (sourceContext?.content || fullClassified || isPending) {
     const analysis = learnCache[page.id] || {};
     const layout = document.createElement('div');
     layout.className = 'source-layout';
@@ -1677,11 +1752,20 @@ function renderCurrentPage() {
     const left = document.createElement('div');
     left.className = 'source-side source-left source-accordions';
     const leftParts = [];
-    if (fullClassified) leftParts.push(renderClassifiedLeftPanel(fullClassified));
+    if (fullClassified) {
+      leftParts.push(renderClassifiedLeftPanel(fullClassified));
+    } else if (isPending) {
+      leftParts.push(renderClassifiedLeftSkeleton());
+    }
     if (sourceContext?.content) {
       const sections = sourceContextSections(sourceContext);
+      // Dedup: when classified.transcript is present, suppress the Extracted
+      // Text accordion (same content, just less structured). Keep Structure
+      // and Key Concepts since those frame the OCR differently from the
+      // classifier's payload.
+      const haveTranscript = Boolean(fullClassified?.transcript?.trim());
+      if (!haveTranscript) leftParts.push(sourceAccordion('Extracted Text', sections.extracted));
       leftParts.push(
-        sourceAccordion('Extracted Text', sections.extracted),
         sourceAccordion('Structure', sections.structure),
         sourceAccordion('Key Concepts', sections.concepts),
       );
@@ -1699,7 +1783,11 @@ function renderCurrentPage() {
     const right = document.createElement('div');
     right.className = 'source-side source-right';
     const rightParts = [];
-    if (fullClassified) rightParts.push(renderClassifiedRightPanel(fullClassified));
+    if (fullClassified) {
+      rightParts.push(renderClassifiedRightPanel(fullClassified));
+    } else if (isPending) {
+      rightParts.push(renderClassifiedRightSkeleton());
+    }
     rightParts.push(drillResultPanel(activeDrill));
     right.innerHTML = rightParts.filter(Boolean).join('');
 
