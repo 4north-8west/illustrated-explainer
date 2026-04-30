@@ -83,6 +83,39 @@
   .source-panel.split { max-height: none; }
   .source-left .source-panel, .source-right .source-panel { min-height: 0; max-height: none; }
   .source-panel h2 { font-size: 14px; color: #4f463b; margin: 0 0 8px; border-bottom: 1px solid #ece6de; padding-bottom: 5px; }
+  /* Phase B classified panels */
+  .source-panel .panel-meta { font-size: 11px; font-weight: 400; color: #999; float: right; }
+  .source-panel.cat-card { background: #fffdf9; }
+  .cat-pill { display: inline-block; font-size: 11px; padding: 2px 9px; border-radius: 11px; background: #f0e8d8; color: #6b5a3e; font-weight: 600; letter-spacing: 0.02em; margin: 2px 4px 2px 0; }
+  .cat-pill.cat-chart       { background: #e3edf5; color: #2563a8; }
+  .cat-pill.cat-event_flyer { background: #fbe8e3; color: #a23b31; }
+  .cat-pill.cat-diagram     { background: #e6efe9; color: #2e6b4a; }
+  .cat-pill.cat-general     { background: #f0e8d8; color: #6b5a3e; }
+  .cat-pill.cat-tag         { font-weight: 400; font-size: 10.5px; }
+  .cat-rationale { font-size: 12px; color: #666; line-height: 1.5; margin: 8px 0 0; font-style: italic; }
+  .card-tagline { font-size: 13px; color: #555; font-style: italic; margin: 0 0 10px; }
+  .card-takeaway { background: #f7f5f2; border-left: 3px solid #6b5a3e; padding: 6px 10px; font-size: 12.5px; color: #4f463b; margin: 0 0 10px; line-height: 1.5; }
+  .card-list { font-size: 12px; line-height: 1.5; color: #4f463b; margin: 4px 0 8px; padding-left: 18px; }
+  .card-list li { margin-bottom: 3px; }
+  .card-list li .comp-role { display: inline-block; font-size: 9.5px; background: #ece6de; color: #6b5a3e; padding: 0 5px; border-radius: 7px; margin-left: 4px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .card-list li .rel-arrow { color: #999; margin: 0 3px; }
+  .card-list li .region-rationale { color: #888; font-size: 11.5px; }
+  .card-tags { margin: 4px 0 8px; }
+  .card-dl { font-size: 12px; color: #4f463b; margin: 4px 0 8px; }
+  .card-dl dt { font-weight: 600; color: #4f463b; margin-top: 6px; }
+  .card-dl dt:first-child { margin-top: 0; }
+  .card-dl dd { margin: 1px 0 0 0; padding-left: 4px; line-height: 1.5; }
+  .card-dl dd ul { margin: 0; padding-left: 16px; }
+  .transcript-content { font-family: "SF Mono", ui-monospace, monospace; font-size: 11.5px; line-height: 1.55; color: #4f463b; white-space: pre-wrap; word-break: break-word; }
+  .transcript-content.collapsed { max-height: 220px; overflow: hidden; mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0, rgba(0,0,0,1) 70%, rgba(0,0,0,0) 100%); }
+  .panel-toggle { margin-top: 6px; font-size: 11px; padding: 3px 9px; background: transparent; border: 1px solid #d6cfc7; border-radius: 5px; color: #6b5a3e; cursor: pointer; font-family: inherit; }
+  .panel-toggle:hover { background: #f0ede8; border-color: #aaa; }
+  .card-table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin: 8px 0; }
+  .card-table th, .card-table td { padding: 4px 8px; border-bottom: 1px solid #ece6de; text-align: left; }
+  .card-table th { font-weight: 600; color: #6b5a3e; background: #faf3e3; }
+  .card-table tbody tr:hover { background: #faf8f5; }
+  .hint-label { font-size: 11px; color: #999; margin: 0 0 4px; }
+  .intent-chip-row.preview { padding: 0; }
   .source-panel .source-content { font-size: 13px; line-height: 1.55; color: #48433d; }
   .source-panel .source-content h1 { font-size: 16px; margin: 0 0 8px; }
   .source-panel .source-content h2 { font-size: 13px; margin: 12px 0 6px; border: 0; padding: 0; }
@@ -915,6 +948,172 @@ function sourcePanel(title, content, extraClass = '') {
   </section>`;
 }
 
+// ── Phase B: classified-payload side panels (auto-surface in 3-column layout) ──
+// The page object only carries the "slim" subset (category + drill_hints +
+// style_preset). We need the full structured payload (transcript, visual_summary,
+// chart/diagram/etc data) for the side panels — so we keep a per-page cache,
+// fetch on demand, and re-render when it arrives.
+const fullClassifiedCache = {};                  // pageId -> full classified payload
+const fullClassifiedRequests = {};               // pageId -> in-flight Promise
+
+function loadFullClassified(pageId) {
+  if (!pageId) return;
+  if (fullClassifiedCache[pageId] || fullClassifiedRequests[pageId]) return;
+  fullClassifiedRequests[pageId] = fetch(`/api/classify/${pageId}`)
+    .then(res => res.ok ? res.json() : { classified: null })
+    .then(data => { fullClassifiedCache[pageId] = data?.classified || null; })
+    .catch(() => { fullClassifiedCache[pageId] = null; })
+    .finally(() => {
+      delete fullClassifiedRequests[pageId];
+      if (state.pages[state.currentIndex]?.id === pageId) renderCurrentPage();
+    });
+}
+
+// Left panel: visual summary + transcript (with toggle for long transcripts).
+function renderClassifiedLeftPanel(full) {
+  if (!full || full.fallback_used) return '';
+  const summary = full.visual_summary || '';
+  const transcript = full.transcript || '';
+  const summaryHtml = summary
+    ? `<section class="source-panel"><h2>Visual summary</h2><div class="source-content"><p>${escapeHtml(summary)}</p></div></section>`
+    : '';
+  let transcriptHtml = '';
+  if (transcript.trim()) {
+    const transcriptId = `transcript-${full.classified_at?.replace(/[^a-z0-9]/gi, '') || Math.random().toString(36).slice(2, 8)}`;
+    const isLong = transcript.length > 600;
+    const escaped = escapeHtml(transcript).replace(/\n/g, '<br>');
+    transcriptHtml = `<section class="source-panel">
+      <h2>Transcript <span class="panel-meta">${transcript.length.toLocaleString()} chars</span></h2>
+      <div class="source-content transcript-content${isLong ? ' collapsed' : ''}" id="${transcriptId}">${escaped}</div>
+      ${isLong ? `<button type="button" class="panel-toggle" data-toggle-target="${transcriptId}">Show more ↓</button>` : ''}
+    </section>`;
+  }
+  return summaryHtml + transcriptHtml;
+}
+
+// Right panel: category-specific structured-data card + drill-hints preview.
+function renderClassifiedRightPanel(full) {
+  if (!full || full.fallback_used) return '';
+  const conf = typeof full.category_confidence === 'number' ? Math.round(full.category_confidence * 100) : 0;
+  const factsHtml = `<section class="source-panel">
+    <h2>Identified as <span class="panel-meta">${conf}% confidence</span></h2>
+    <div class="source-content">
+      <div class="cat-pill cat-${escapeHtml(full.category || 'general')}">${escapeHtml(prettyCategory(full.category))}</div>
+      ${full.category_rationale ? `<p class="cat-rationale">${escapeHtml(full.category_rationale)}</p>` : ''}
+    </div>
+  </section>`;
+  let cardHtml = '';
+  if (full.category === 'chart' && full.chart) cardHtml = renderChartCard(full.chart);
+  else if (full.category === 'event_flyer' && full.event_flyer) cardHtml = renderEventFlyerCard(full.event_flyer);
+  else if (full.category === 'diagram' && full.diagram) cardHtml = renderDiagramCard(full.diagram);
+  else if (full.category === 'general' && full.general) cardHtml = renderGeneralCard(full.general);
+  const hintsHtml = renderDrillHintsPreview(full.drill_hints);
+  return factsHtml + cardHtml + hintsHtml;
+}
+
+function prettyCategory(c) {
+  return ({ chart: 'Chart', event_flyer: 'Event flyer', diagram: 'Diagram', general: 'General image' })[c] || c || 'Unknown';
+}
+
+function renderChartCard(c) {
+  if (!c) return '';
+  const axes = (c.x_axis?.label || c.y_axis?.label)
+    ? `<p><strong>Axes:</strong> ${escapeHtml(c.x_axis?.label || '?')} → ${escapeHtml(c.y_axis?.label || '?')}${c.y_axis?.unit ? ` (${escapeHtml(c.y_axis.unit)})` : ''}</p>`
+    : '';
+  const takeaway = c.takeaway ? `<p class="card-takeaway">${escapeHtml(c.takeaway)}</p>` : '';
+  let table = '';
+  const firstSeries = c.series?.[0];
+  if (firstSeries?.points?.length) {
+    const rows = firstSeries.points.slice(0, 12).map(p => `<tr><td>${escapeHtml(String(p.x ?? ''))}</td><td>${escapeHtml(String(p.y ?? ''))}</td></tr>`).join('');
+    table = `<table class="card-table">
+      <thead><tr><th>${escapeHtml(c.x_axis?.label || 'x')}</th><th>${escapeHtml(c.y_axis?.label || 'y')}</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+  return `<section class="source-panel cat-card">
+    <h2>${escapeHtml(c.title || 'Chart data')} <span class="panel-meta">${escapeHtml(c.chart_type || 'chart')}</span></h2>
+    <div class="source-content">${takeaway}${axes}${table}</div>
+  </section>`;
+}
+
+function renderEventFlyerCard(f) {
+  if (!f) return '';
+  const dates = (f.dates || []).slice(0, 4).map(d => `<li>${escapeHtml(d.label_raw || '')}</li>`).join('');
+  const datesHtml = dates ? `<ul class="card-list">${dates}</ul>` : '';
+  const loc = f.location ? [f.location.venue, f.location.address].filter(Boolean).map(escapeHtml).join(' · ') : '';
+  const ctas = (f.key_calls_to_action || []).slice(0, 4).map(c => `<li>${escapeHtml(c)}</li>`).join('');
+  return `<section class="source-panel cat-card">
+    <h2>${escapeHtml(f.title || 'Event details')}</h2>
+    <div class="source-content">
+      ${f.tagline ? `<p class="card-tagline">${escapeHtml(f.tagline)}</p>` : ''}
+      <dl class="card-dl">
+        ${datesHtml ? `<dt>📅 When</dt><dd>${datesHtml}</dd>` : ''}
+        ${loc ? `<dt>📍 Where</dt><dd>${loc}</dd>` : ''}
+        ${f.cost ? `<dt>💵 Cost</dt><dd>${escapeHtml(f.cost)}</dd>` : ''}
+        ${f.audience ? `<dt>👥 Audience</dt><dd>${escapeHtml(f.audience)}</dd>` : ''}
+        ${f.register_by ? `<dt>⏰ Register by</dt><dd>${escapeHtml(f.register_by)}</dd>` : ''}
+        ${f.organizer ? `<dt>🏛 Organizer</dt><dd>${escapeHtml(f.organizer)}</dd>` : ''}
+        ${(f.contact?.email || f.contact?.phone || f.contact?.website)
+          ? `<dt>✉ Contact</dt><dd>${[f.contact.email, f.contact.phone, f.contact.website].filter(Boolean).map(escapeHtml).join(' · ')}</dd>`
+          : ''}
+      </dl>
+      ${ctas ? `<p><strong>Calls to action:</strong></p><ul class="card-list">${ctas}</ul>` : ''}
+    </div>
+  </section>`;
+}
+
+function renderDiagramCard(d) {
+  if (!d) return '';
+  const components = (d.components || []).slice(0, 8).map(c => {
+    const role = c.role ? `<span class="comp-role">${escapeHtml(c.role)}</span>` : '';
+    return `<li><strong>${escapeHtml(c.label)}</strong>${role}${c.description ? ` — ${escapeHtml(c.description)}` : ''}</li>`;
+  }).join('');
+  const rels = (d.relationships || []).slice(0, 6).map(r =>
+    `<li>${escapeHtml(r.from)} <span class="rel-arrow">→</span> ${escapeHtml(r.to)}${r.kind ? ` <span class="comp-role">${escapeHtml(r.kind)}</span>` : ''}</li>`
+  ).join('');
+  const steps = (d.process_steps || []).slice(0, 8).map(s => `<li><strong>${s.step}.</strong> ${escapeHtml(s.summary)}</li>`).join('');
+  return `<section class="source-panel cat-card">
+    <h2>${escapeHtml(d.subject || 'Diagram')} <span class="panel-meta">${escapeHtml(d.diagram_type || 'diagram')}</span></h2>
+    <div class="source-content">
+      ${components ? `<p><strong>Components:</strong></p><ul class="card-list">${components}</ul>` : ''}
+      ${rels ? `<p><strong>Relationships:</strong></p><ul class="card-list">${rels}</ul>` : ''}
+      ${steps ? `<p><strong>Process:</strong></p><ol class="card-list">${steps}</ol>` : ''}
+    </div>
+  </section>`;
+}
+
+function renderGeneralCard(g) {
+  if (!g) return '';
+  const subs = (g.subjects || []).map(s => `<span class="cat-pill cat-tag">${escapeHtml(s)}</span>`).join(' ');
+  const details = (g.notable_details || []).slice(0, 6).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+  return `<section class="source-panel cat-card">
+    <h2>What's in this image</h2>
+    <div class="source-content">
+      ${subs ? `<div class="card-tags">${subs}</div>` : ''}
+      ${g.setting ? `<p><strong>Setting:</strong> ${escapeHtml(g.setting)}</p>` : ''}
+      ${details ? `<p><strong>Notable details:</strong></p><ul class="card-list">${details}</ul>` : ''}
+      ${g.likely_purpose ? `<p><strong>Purpose:</strong> ${escapeHtml(g.likely_purpose)}</p>` : ''}
+    </div>
+  </section>`;
+}
+
+function renderDrillHintsPreview(hints) {
+  if (!hints || (!hints.suggested_intents?.length && !hints.regions_of_interest?.length)) return '';
+  const intents = (hints.suggested_intents || []).slice(0, 4).map(i =>
+    `<button type="button" class="intent-chip" data-preview-intent="${escapeHtml(i)}">${escapeHtml(i)}</button>`
+  ).join('');
+  const regions = (hints.regions_of_interest || []).slice(0, 5).map(r =>
+    `<li><strong>${escapeHtml(r.label)}</strong> — <span class="region-rationale">${escapeHtml(r.rationale)}</span></li>`
+  ).join('');
+  return `<section class="source-panel cat-card">
+    <h2>Drill suggestions</h2>
+    <div class="source-content">
+      ${intents ? `<p class="hint-label">Click a chip to start drilling with that question pre-filled:</p><div class="intent-chip-row preview">${intents}</div>` : ''}
+      ${regions ? `<p class="hint-label" style="margin-top:10px">Worth clicking on:</p><ul class="card-list">${regions}</ul>` : ''}
+    </div>
+  </section>`;
+}
+
 function sourceAccordion(title, content) {
   return `<details class="source-accordion">
     <summary>${escapeHtml(title)}</summary>
@@ -1273,12 +1472,16 @@ function renderCurrentPage() {
   container.className = `image-container${state.drillMode ? ' clickable' : ''}`;
   loadSourceContext(page.id);
   loadInlineAnalysis(page.id);
+  // Phase B: when the page is classified, fetch the full structured payload
+  // so the side panels can render its transcript / category card / drill hints.
+  if (page.classified) loadFullClassified(page.id);
+  const fullClassified = fullClassifiedCache[page.id] || null;
   const drillGroups = drillGroupsForPage(page.id);
   const activeDrill = activeDrillSelection(page.id, drillGroups);
 
   const img = document.createElement('img');
   img.src = page.imageUrl;
-  img.alt = 'Illustrated page';
+  img.alt = (fullClassified?.visual_summary?.slice(0, 200)) || 'Illustrated page';
   img.draggable = false;
 
   img.onclick = (e) => {
@@ -1462,21 +1665,32 @@ function renderCurrentPage() {
   }
 
   const sourceContext = sourceContextCache[page.id];
-  if (sourceContext?.content) {
-    const sections = sourceContextSections(sourceContext);
+  // Phase B: render the 3-column layout when EITHER a source-context (uploaded
+  // image OCR pre-Phase A) OR a classified payload (Phase A) is available.
+  // Show the classified-derived panels alongside the existing accordions so
+  // upload-flow images surface both representations.
+  if (sourceContext?.content || fullClassified) {
     const analysis = learnCache[page.id] || {};
     const layout = document.createElement('div');
     layout.className = 'source-layout';
 
     const left = document.createElement('div');
     left.className = 'source-side source-left source-accordions';
-    left.innerHTML = [
-      sourceAccordion('Extracted Text', sections.extracted),
-      sourceAccordion('Structure', sections.structure),
-      sourceAccordion('Key Concepts', sections.concepts),
+    const leftParts = [];
+    if (fullClassified) leftParts.push(renderClassifiedLeftPanel(fullClassified));
+    if (sourceContext?.content) {
+      const sections = sourceContextSections(sourceContext);
+      leftParts.push(
+        sourceAccordion('Extracted Text', sections.extracted),
+        sourceAccordion('Structure', sections.structure),
+        sourceAccordion('Key Concepts', sections.concepts),
+      );
+    }
+    leftParts.push(
       analysisAccordion(page.id, 'Description', 'description', analysis.description),
       analysisAccordion(page.id, 'Concepts', 'explanation', analysis.explanation),
-    ].join('');
+    );
+    left.innerHTML = leftParts.filter(Boolean).join('');
 
     const center = document.createElement('div');
     center.className = 'source-center';
@@ -1484,17 +1698,47 @@ function renderCurrentPage() {
 
     const right = document.createElement('div');
     right.className = 'source-side source-right';
-    right.innerHTML = drillResultPanel(activeDrill);
+    const rightParts = [];
+    if (fullClassified) rightParts.push(renderClassifiedRightPanel(fullClassified));
+    rightParts.push(drillResultPanel(activeDrill));
+    right.innerHTML = rightParts.filter(Boolean).join('');
 
     layout.appendChild(left);
     layout.appendChild(center);
     layout.appendChild(right);
     canvas.appendChild(layout);
     bindInlineAnalysisActions(left, page.id);
+    bindClassifiedPanelActions(layout, page);
     renderMath(layout);
   } else {
     canvas.appendChild(container);
   }
+}
+
+// Hooks for the classified-payload panels — transcript expand/collapse, intent
+// chip click (puts the image in drill mode and prefills the intent), and
+// region-of-interest click (also prefills, but as a free-form starting point).
+function bindClassifiedPanelActions(root, page) {
+  root.querySelectorAll('[data-toggle-target]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.toggleTarget;
+      const target = document.getElementById(id);
+      if (!target) return;
+      const collapsed = target.classList.toggle('collapsed');
+      btn.textContent = collapsed ? 'Show more ↓' : 'Show less ↑';
+    };
+  });
+  root.querySelectorAll('[data-preview-intent]').forEach(btn => {
+    btn.onclick = () => {
+      // Activate drill mode and preserve the intent so the user can click anywhere on the image
+      // to drill with this question. If they click the chip again or another, the intent updates.
+      state.drillMode = true;
+      state.pendingClick = state.pendingClick || { x: 0.5, y: 0.5, intent: '' };
+      state.pendingClick.intent = btn.dataset.previewIntent;
+      updateUI();
+      renderCurrentPage();
+    };
+  });
 }
 
 // --- Generation ---
