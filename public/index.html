@@ -355,6 +355,23 @@
   .learn-content code { font-family: monospace; background: #f0ede8; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
   .learn-timestamp { font-size: 11px; color: #bbb; text-align: right; margin-top: 16px; font-style: italic; }
 
+/* Vault mode toolbar controls */
+.vault-cluster { position: relative; display: flex; align-items: center; gap: 6px; }
+.vault-toggle { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; user-select: none; color: #3a3632; }
+.vault-toggle input[type=checkbox] { width: 14px; height: 14px; accent-color: #3a3632; cursor: pointer; }
+.vault-toggle.active { font-weight: 600; }
+#vaultFilterBtn { padding: 3px 6px; font-size: 11px; line-height: 1; }
+.vault-filter-popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: 100; background: #fff; border: 1px solid #ccc; border-radius: 3px; box-shadow: 0 4px 12px rgba(0,0,0,.12); padding: 12px; min-width: 280px; font-size: 12px; }
+.vault-filter-popover.hidden { display: none; }
+.vault-filter-section { margin-bottom: 10px; }
+.vault-filter-section h4 { margin: 0 0 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #888; }
+.vault-filter-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.vault-filter-chip { display: flex; align-items: center; gap: 4px; background: #f0ede8; border: 1px solid #ddd; border-radius: 2px; padding: 2px 6px; font-size: 11px; font-family: monospace; }
+.vault-filter-chip button { border: none; background: none; cursor: pointer; color: #888; font-size: 12px; padding: 0; line-height: 1; }
+.vault-filter-add { display: flex; gap: 4px; align-items: center; }
+.vault-filter-add input { border: 1px solid #ccc; border-radius: 2px; padding: 3px 6px; font-size: 11px; font-family: monospace; width: 90px; }
+.vault-filter-add button { padding: 3px 8px; font-size: 11px; }
+
 </style>
 <script>
   window.MathJax = {
@@ -391,6 +408,32 @@
       <button class="btn" id="learnBtn" disabled title="Generate accessible analysis"><span class="btn-glyph">📖</span> Learn</button>
       <button class="btn" id="galleryBtn" title="Browse all generated images"><span class="btn-glyph">▦</span> Gallery</button>
       <button class="btn" id="settingsBtn" title="Model configuration and preferences"><span class="btn-glyph">⚙</span> Settings</button>
+    </div>
+    <div class="btn-cluster vault-cluster" id="vaultCluster">
+      <label class="vault-toggle" id="vaultToggleLabel" title="Augment drill-downs with vault search">
+        <input type="checkbox" id="vaultCheckbox"> Vault
+      </label>
+      <button class="btn" id="vaultFilterBtn" title="Configure vault filters">⚙</button>
+      <div class="vault-filter-popover hidden" id="vaultFilterPopover">
+        <div class="vault-filter-section" id="vaultIncludeSection">
+          <h4>Include if</h4>
+          <div class="vault-filter-chips" id="vaultIncludeChips"></div>
+          <div class="vault-filter-add">
+            <input type="text" id="vaultIncludeField" placeholder="field" />
+            <input type="text" id="vaultIncludeValue" placeholder="value" />
+            <button class="btn" id="vaultIncludeAdd">+ Add</button>
+          </div>
+        </div>
+        <div class="vault-filter-section" id="vaultExcludeSection">
+          <h4>Exclude if</h4>
+          <div class="vault-filter-chips" id="vaultExcludeChips"></div>
+          <div class="vault-filter-add">
+            <input type="text" id="vaultExcludeField" placeholder="field" />
+            <input type="text" id="vaultExcludeValue" placeholder="value" />
+            <button class="btn" id="vaultExcludeAdd">+ Add</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -454,6 +497,8 @@ const state = {
   language: '',
   pendingClick: null, // { x, y } — awaiting confirmation
   activeDrillByParent: {}, // parent page id -> { key, index }
+  vaultMode: false,
+  vaultFilters: { include: [], exclude: [] },
 };
 
 const $ = id => document.getElementById(id);
@@ -462,6 +507,28 @@ const sourceContextCache = {}; // pageId -> source context page or null
 const sourceContextRequests = {}; // pageId -> Promise
 const sourceContextState = new Map(); // pageId -> pending | unavailable
 const inlineAnalysisRequests = {}; // pageId -> Promise
+
+function renderVaultFilterChips() {
+  function renderChips(containerId, rules, kind) {
+    const container = $(containerId);
+    if (!container) return;
+    container.innerHTML = rules.map((r, i) =>
+      `<span class="vault-filter-chip">${escapeHtml(r.field)}:${escapeHtml(r.value)}
+        <button data-kind="${kind}" data-index="${i}" title="Remove rule">✕</button>
+      </span>`
+    ).join('');
+    container.querySelectorAll('button[data-kind]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset.index);
+        state.vaultFilters[btn.dataset.kind].splice(idx, 1);
+        saveSession();
+        renderVaultFilterChips();
+      });
+    });
+  }
+  renderChips('vaultIncludeChips', state.vaultFilters.include, 'include');
+  renderChips('vaultExcludeChips', state.vaultFilters.exclude, 'exclude');
+}
 
 function escapeHtml(text) {
   return String(text)
@@ -758,6 +825,8 @@ function saveSession() {
       responseDepth: state.responseDepth,
       language: state.language,
       activeDrillByParent: state.activeDrillByParent,
+      vaultMode: state.vaultMode,
+      vaultFilters: state.vaultFilters,
       savedAt: new Date().toISOString(),
     }));
   } catch (err) {
@@ -1024,6 +1093,8 @@ async function restoreSession() {
       if (saved.activeDrillByParent && typeof saved.activeDrillByParent === 'object') {
         state.activeDrillByParent = saved.activeDrillByParent;
       }
+      if (typeof saved.vaultMode === 'boolean') state.vaultMode = saved.vaultMode;
+      if (saved.vaultFilters && typeof saved.vaultFilters === 'object') state.vaultFilters = saved.vaultFilters;
       state.pendingClick = null;
       state.drillMode = false;
       renderModeSelector();
@@ -1977,20 +2048,12 @@ function renderCurrentPage() {
     if (sourceContext?.content) {
       const sections = sourceContextSections(sourceContext);
       // Dedup: when classified.transcript is present, suppress the Extracted
-      // Text accordion (same content, just less structured). Keep Structure
-      // and Key Concepts since those frame the OCR differently from the
-      // classifier's payload.
+      // Text accordion (same content, just less structured). Key Concepts,
+      // Description, and Concepts now live in the Learn menu only.
       const haveTranscript = Boolean(fullClassified?.transcript?.trim());
       if (!haveTranscript) leftParts.push(sourceAccordion('Extracted Text', sections.extracted));
-      leftParts.push(
-        sourceAccordion('Structure', sections.structure),
-        sourceAccordion('Key Concepts', sections.concepts),
-      );
+      leftParts.push(sourceAccordion('Structure', sections.structure));
     }
-    leftParts.push(
-      analysisAccordion(page.id, 'Description', 'description', analysis.description),
-      analysisAccordion(page.id, 'Concepts', 'explanation', analysis.explanation),
-    );
     left.innerHTML = leftParts.filter(Boolean).join('');
 
     const center = document.createElement('div');
@@ -2710,6 +2773,52 @@ $('galleryOverlay').addEventListener('click', () => closePanel('gallery'));
 $('settingsBtn').addEventListener('click', openSettings);
 $('settingsClose').addEventListener('click', () => closePanel('settings'));
 $('settingsOverlay').addEventListener('click', () => closePanel('settings'));
+
+// Vault checkbox
+$('vaultCheckbox').checked = state.vaultMode;
+$('vaultToggleLabel').classList.toggle('active', state.vaultMode);
+$('vaultCheckbox').addEventListener('change', () => {
+  state.vaultMode = $('vaultCheckbox').checked;
+  $('vaultToggleLabel').classList.toggle('active', state.vaultMode);
+  saveSession();
+});
+
+// Vault filter popover toggle
+$('vaultFilterBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const pop = $('vaultFilterPopover');
+  pop.classList.toggle('hidden');
+  if (!pop.classList.contains('hidden')) renderVaultFilterChips();
+});
+document.addEventListener('click', (e) => {
+  if (!$('vaultCluster').contains(e.target)) {
+    $('vaultFilterPopover').classList.add('hidden');
+  }
+});
+
+// Add include rule
+$('vaultIncludeAdd').addEventListener('click', () => {
+  const field = $('vaultIncludeField').value.trim();
+  const value = $('vaultIncludeValue').value.trim();
+  if (!field || !value) return;
+  state.vaultFilters.include.push({ field, value });
+  $('vaultIncludeField').value = '';
+  $('vaultIncludeValue').value = '';
+  saveSession();
+  renderVaultFilterChips();
+});
+
+// Add exclude rule
+$('vaultExcludeAdd').addEventListener('click', () => {
+  const field = $('vaultExcludeField').value.trim();
+  const value = $('vaultExcludeValue').value.trim();
+  if (!field || !value) return;
+  state.vaultFilters.exclude.push({ field, value });
+  $('vaultExcludeField').value = '';
+  $('vaultExcludeValue').value = '';
+  saveSession();
+  renderVaultFilterChips();
+});
 
 // Global keyboard shortcuts (skip when typing in form fields)
 document.addEventListener('keydown', (e) => {
