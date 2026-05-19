@@ -372,6 +372,15 @@
 .vault-filter-add input { border: 1px solid #ccc; border-radius: 2px; padding: 3px 6px; font-size: 11px; font-family: monospace; width: 90px; }
 .vault-filter-add button { padding: 3px 8px; font-size: 11px; }
 
+/* Vault sources panel */
+.vault-hits-list { display: flex; flex-direction: column; gap: 0; }
+.vault-hit { padding: 8px 10px; border-bottom: 1px solid #ede9e4; transition: background .15s; }
+.vault-hit:last-child { border-bottom: none; }
+.vault-hit:hover { background: #faf8f5; }
+.vault-hit-main { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
+.vault-hit-title { font-size: 12px; font-weight: 500; color: #2c2a28; line-height: 1.35; }
+.vault-hit-score { font-size: 10px; font-family: monospace; color: #aaa; white-space: nowrap; margin-top: 1px; }
+.vault-hit-path { font-size: 10px; font-family: monospace; color: #999; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 <script>
   window.MathJax = {
@@ -507,6 +516,7 @@ const sourceContextCache = {}; // pageId -> source context page or null
 const sourceContextRequests = {}; // pageId -> Promise
 const sourceContextState = new Map(); // pageId -> pending | unavailable
 const inlineAnalysisRequests = {}; // pageId -> Promise
+const vaultHitsCache = new Map(); // pageId -> hits[]
 
 function renderVaultFilterChips() {
   function renderChips(containerId, rules, kind) {
@@ -1215,6 +1225,25 @@ function loadFullClassified(pageId) {
 }
 
 // Left panel: visual summary + transcript (with toggle for long transcripts).
+function renderVaultPanel(hits) {
+  if (!hits?.length) return '';
+  const rows = hits.map((h, i) => `
+    <div class="vault-hit" data-vault-hit="${i}" style="cursor:pointer">
+      <div class="vault-hit-main">
+        <span class="vault-hit-title">${escapeHtml(h.title)}</span>
+        <span class="vault-hit-score">${Number(h.score).toFixed(2)}</span>
+      </div>
+      <div class="vault-hit-path">${escapeHtml(h.path)}</div>
+    </div>
+  `).join('');
+  return `
+    <section class="source-panel" id="vault-sources-panel">
+      <h2>Vault Sources <span class="panel-meta">${hits.length} result${hits.length !== 1 ? 's' : ''}</span></h2>
+      <div class="vault-hits-list">${rows}</div>
+    </section>
+  `;
+}
+
 function renderClassifiedLeftPanel(full) {
   if (!full || full.fallback_used) return '';
   const summary = full.visual_summary || '';
@@ -2054,6 +2083,11 @@ function renderCurrentPage() {
       if (!haveTranscript) leftParts.push(sourceAccordion('Extracted Text', sections.extracted));
       leftParts.push(sourceAccordion('Structure', sections.structure));
     }
+    // Vault Sources panel — only for drill result pages with cached hits
+    const currentVaultHits = vaultHitsCache.get(page.id);
+    if (state.vaultMode && currentVaultHits?.length) {
+      leftParts.push(renderVaultPanel(currentVaultHits));
+    }
     left.innerHTML = leftParts.filter(Boolean).join('');
 
     const center = document.createElement('div');
@@ -2145,10 +2179,17 @@ async function generateChildPage(parentId, x, y, responseKind = 'image', intent 
   try {
     const res = await fetch('/api/page', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parentId, parentClick: { x, y }, responseKind: safeResponseKind, intent, responseDepth: state.responseDepth, language: state.language }),
+      body: JSON.stringify({
+        parentId, parentClick: { x, y },
+        responseKind: safeResponseKind, intent,
+        responseDepth: state.responseDepth, language: state.language,
+        vaultMode: state.vaultMode && safeResponseKind === 'markdown',
+        vaultFilters: state.vaultFilters,
+      }),
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
-    const { page } = await res.json();
+    const { page, vaultHits } = await res.json();
+    if (vaultHits?.length) vaultHitsCache.set(page.id, vaultHits);
     state.pages.push(page);
     if (page.parentId && page.parentClick) {
       const key = drillKey(page.parentClick);
