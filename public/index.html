@@ -1105,6 +1105,11 @@ async function restoreSession() {
       }
       if (typeof saved.vaultMode === 'boolean') state.vaultMode = saved.vaultMode;
       if (saved.vaultFilters && typeof saved.vaultFilters === 'object') state.vaultFilters = saved.vaultFilters;
+      const vaultCb = $('vaultCheckbox');
+      if (vaultCb) {
+        vaultCb.checked = state.vaultMode;
+        $('vaultToggleLabel').classList.toggle('active', state.vaultMode);
+      }
       state.pendingClick = null;
       state.drillMode = false;
       renderModeSelector();
