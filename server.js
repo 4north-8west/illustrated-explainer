@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { classifyImage, buildGenerationContext, resolveStyleFromClassified } from './analysis/classify.js';
+import { searchVault } from './vault.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -694,6 +695,14 @@ function savePageContent(folder, id, page) {
   fs.writeFileSync(pageJsonPath(folder, id), JSON.stringify(page, null, 2));
 }
 
+function buildVaultQuery(intent, classified) {
+  const parts = [];
+  if (intent) parts.push(intent);
+  if (classified?.visual_summary) parts.push(classified.visual_summary);
+  if (classified?.transcript) parts.push(classified.transcript.slice(0, 300));
+  return parts.join(' ').slice(0, 500);
+}
+
 // Load the cached classified payload for a page, or null if not yet classified
 // (or page is not an image). Phase A.2 uses this to thread parent context into
 // the drill child generation prompts.
@@ -1298,6 +1307,15 @@ async function generateUploadContextPage(uploadPageIdValue) {
     return cached;
   }
 
+  // v2 fast-path (2026-05-15): if classify already returned a payload, the
+  // context page can be SYNTHESIZED from it — no separate vision call.
+  // This is the expected branch when called from the intake pipeline.
+  const analysis = loadAnalysis(uploadPageIdValue);
+  if (analysis?.classified && !analysis.classified.fallback_used) {
+    const synthesized = writeContextPageFromClassified(uploadPageIdValue, analysis.classified);
+    if (synthesized) return synthesized;
+  }
+
   const imagePath = path.join(GENERATED_DIR, meta.folder, `${uploadPageIdValue}.png`);
   if (!fs.existsSync(imagePath)) throw new Error('Upload image file not found');
   setAnalysisStage(uploadPageIdValue, 'context', 'running');
@@ -1429,9 +1447,10 @@ async function callTextChat(provider, model, systemPrompt, userPrompt) {
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.2,
-      max_tokens: 4096,
+      // 2026-05-15: bumped 4096 → 8192 for the v2 text-only synthesis pass.
+      max_tokens: 8192,
     }),
-    signal: AbortSignal.timeout(180000),
+    signal: AbortSignal.timeout(240000),
   });
   if (!response.ok) {
     const err = await response.text();
@@ -1595,7 +1614,9 @@ app.get('/api/page/:pageId/children', (req, res) => {
 });
 
 app.post('/api/page', async (req, res) => {
-  const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind, responseDepth: reqResponseDepth, language: reqLanguage } = req.body;
+  const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind, responseDepth: reqResponseDepth, language: reqLanguage, vaultMode: reqVaultMode, vaultFilters: reqVaultFilters } = req.body;
+  const vaultMode = reqVaultMode === true;
+  const vaultFilters = (reqVaultFilters && typeof reqVaultFilters === 'object') ? reqVaultFilters : { include: [], exclude: [] };
   let responseKind = ['markdown', 'chart', 'table', 'diagram'].includes(reqResponseKind) ? reqResponseKind : 'image';
   const intent = typeof reqIntent === 'string' ? reqIntent.trim().slice(0, 500) : '';
   const responseDepth = ['extract', 'explain', 'teach'].includes(reqResponseDepth) ? reqResponseDepth : 'explain';
@@ -1888,11 +1909,14 @@ function analysisStatus(pageId) {
   return {
     classified: Boolean(analysis.classified && !analysis.classified.fallback_used),
     context: contextReady,
+    explanation: Boolean(analysis.explanation),
+    description: Boolean(analysis.description),
     intake: analysis.intake || null,
     inFlight: {
       classify: classifyInFlight.has(pageId),
       context: contextInFlight.has(pageId),
       intake: intakeInFlight.has(pageId),
+      synthesis: typeof synthesisInFlight !== 'undefined' && synthesisInFlight.has(pageId),
     },
     contextPageId: contextReady ? contextId : null,
   };
@@ -1955,9 +1979,12 @@ async function callVisionChat(provider, model, imageBase64, systemPrompt, userPr
           },
         ],
         temperature: 0.3,
-        max_tokens: 4096,
+        // 2026-05-15: bumped 4096 → 8192 to accommodate the v2 combined-extract
+        // payload (classify JSON + description_markdown + visual_layout).
+        // Safe under -c 65536 -np 4 (16,384 tokens/slot).
+        max_tokens: 8192,
       }),
-      signal: AbortSignal.timeout(180000),
+      signal: AbortSignal.timeout(240000),
     });
   } catch (err) {
     if (provider === 'local') {
@@ -2071,6 +2098,17 @@ async function runClassifyForPage(pageId, { force = false } = {}) {
   const existing = loadAnalysis(pageId) || {};
   existing.classified = payload;
   existing.classifiedAt = payload.classified_at;
+  // v2 combined-extract pipeline (2026-05-15): the classify call now also
+  // returns description_markdown (the body the Learn-menu Description tab
+  // renders) and visual_layout (used to synthesize the upload context page).
+  // We save .description here so /api/analysis/:id can serve it without a
+  // second vision call; explanation/Concepts is produced by the text-only
+  // synthesis pass (runConceptSynthesisForPage) downstream.
+  if (!payload.fallback_used && payload.description_markdown) {
+    existing.description = payload.description_markdown;
+    existing.descriptionAt = payload.classified_at;
+    existing.descriptionSource = 'classify (combined vision call)';
+  }
   existing.intake = {
     ...(existing.intake || {}),
     classify: {
@@ -2084,6 +2122,13 @@ async function runClassifyForPage(pageId, { force = false } = {}) {
     },
   };
   saveAnalysis(pageId, existing);
+
+  // For upload-root pages, write the context page directly from the classified
+  // payload — no separate vision call needed.
+  if (!payload.fallback_used && isUploadRootImage(pageId)) {
+    try { writeContextPageFromClassified(pageId, payload); }
+    catch (err) { console.warn(`[classify] ${pageId} context-page synthesis failed:`, err.message); }
+  }
 
   if (payload.fallback_used) {
     console.warn(`[classify] ${pageId}: ${elapsed}ms — FALLBACK (${payload.fallback_reason})`);
@@ -2110,6 +2155,224 @@ function enqueueClassify(pageId, options = {}) {
     })
     .finally(() => classifyInFlight.delete(pageId));
   classifyInFlight.set(pageId, p);
+  return p;
+}
+
+// ── Context-page synthesis from the classified payload ──
+// After the v2 combined-extract refactor (2026-05-15), the classify vision
+// call returns transcript + visual_layout + category-specific structured
+// blocks. The upload-context page is now SYNTHESIZED from those fields with
+// no extra vision call. The legacy generateUploadContextPage remains as a
+// fallback for the rare case classified is unavailable.
+
+function contextMarkdownFromClassified(c) {
+  const transcript = c?.transcript?.trim();
+  const layout = c?.visual_layout?.trim() || c?.visual_summary?.trim() || '(no layout description available)';
+  const cat = c?.category || 'unknown';
+  const conf = typeof c?.category_confidence === 'number' ? c.category_confidence.toFixed(2) : 'n/a';
+  const rationale = c?.category_rationale?.trim() || '';
+
+  // Category-specific extraction block.
+  let dataBlock = '';
+  if (c?.chart) {
+    const ax = c.chart.x_axis ? `${c.chart.x_axis.label || '(x)'}${c.chart.x_axis.unit ? ` [${c.chart.x_axis.unit}]` : ''}` : '(x)';
+    const ay = c.chart.y_axis ? `${c.chart.y_axis.label || '(y)'}${c.chart.y_axis.unit ? ` [${c.chart.y_axis.unit}]` : ''}` : '(y)';
+    const series = (c.chart.series || []).map(s => `- **${s.name || 'series'}**: ${(s.points || []).slice(0, 12).map(p => `(${p.x}, ${p.y})`).join(', ')}${(s.points || []).length > 12 ? ' …' : ''}`).join('\n');
+    dataBlock = `Chart type: **${c.chart.chart_type || 'unknown'}** — ${c.chart.title || '(untitled)'}\n\nAxes: ${ax} × ${ay}\n\n${series || '(no series data)'}\n\n${c.chart.takeaway ? `Takeaway: ${c.chart.takeaway}` : ''}${(c.chart.uncertainty_notes || []).length ? `\n\nUncertainty: ${c.chart.uncertainty_notes.join('; ')}` : ''}`.trim();
+  } else if (c?.event_flyer) {
+    const ef = c.event_flyer;
+    dataBlock = [
+      ef.title && `**${ef.title}**`,
+      ef.tagline,
+      (ef.dates || []).length && `Dates: ${(ef.dates || []).map(d => d.label_raw).filter(Boolean).join('; ')}`,
+      ef.location && (ef.location.venue || ef.location.address) && `Location: ${[ef.location.venue, ef.location.address].filter(Boolean).join(' — ')}`,
+      ef.cost && `Cost: ${ef.cost}`,
+      ef.audience && `Audience: ${ef.audience}`,
+      ef.register_by && `Register by: ${ef.register_by}`,
+      ef.organizer && `Organizer: ${ef.organizer}`,
+      (ef.key_calls_to_action || []).length && `Calls to action: ${ef.key_calls_to_action.join('; ')}`,
+    ].filter(Boolean).join('\n\n');
+  } else if (c?.diagram) {
+    const d = c.diagram;
+    const comps = (d.components || []).map(x => `- **${x.label}**${x.role ? ` (${x.role})` : ''}: ${x.description || ''}`).join('\n');
+    const rels = (d.relationships || []).map(r => `- ${r.from} → ${r.to}${r.kind ? ` (${r.kind})` : ''}${r.description ? `: ${r.description}` : ''}`).join('\n');
+    const steps = (d.process_steps || []).map(s => `${s.step}. ${s.summary}`).join('\n');
+    dataBlock = [
+      d.diagram_type && `Diagram type: **${d.diagram_type}**`,
+      d.subject && `Subject: ${d.subject}`,
+      comps && `\nComponents:\n${comps}`,
+      rels && `\nRelationships:\n${rels}`,
+      steps && `\nProcess:\n${steps}`,
+    ].filter(Boolean).join('\n');
+  } else if (c?.general) {
+    const g = c.general;
+    dataBlock = [
+      (g.subjects || []).length && `Subjects: ${g.subjects.join(', ')}`,
+      g.setting && `Setting: ${g.setting}`,
+      (g.notable_details || []).length && `Notable details:\n${g.notable_details.map(x => `- ${x}`).join('\n')}`,
+      g.likely_purpose && `Likely purpose: ${g.likely_purpose}`,
+    ].filter(Boolean).join('\n\n');
+  }
+
+  return `# Source Context
+
+## Image Type
+Category: **${cat}** (confidence ${conf})${rationale ? `\n\n${rationale}` : ''}
+
+## OCR / Transcription
+${transcript || '(no visible text)'}
+
+## Chart And Data Extraction
+${dataBlock || 'No tabular or chart data identified.'}
+
+## Structure
+${layout}
+`;
+}
+
+function writeContextPageFromClassified(pageId, classified) {
+  const meta = pageMeta[pageId];
+  if (!meta) return null;
+  const contextId = meta.contextPageId || uploadContextPageId(pageId);
+  // Skip if a context page already exists — preserves any prior content the
+  // user has stored, and keeps writeContextPageFromClassified idempotent.
+  const cached = loadPageContent(meta.folder, contextId);
+  if (cached) {
+    if (!meta.contextPageId) {
+      pageMeta[pageId] = { ...meta, contextPageId: contextId };
+      saveMetadata(pageMeta);
+    }
+    setAnalysisStage(pageId, 'context', 'ready', { contextPageId: contextId, source: 'cached' });
+    return cached;
+  }
+  const content = contextMarkdownFromClassified(classified);
+  const page = {
+    id: contextId,
+    type: 'markdown',
+    title: 'Source context',
+    content,
+    source: 'classify (synthesized, no extra model call)',
+    parentId: pageId,
+    parentClick: null,
+    initialQuery: meta.query,
+    mode: meta.mode,
+    intent: 'Analyze uploaded source image',
+    generatedAt: new Date().toISOString(),
+  };
+  savePageContent(meta.folder, contextId, page);
+  pageMeta[contextId] = {
+    folder: meta.folder,
+    query: meta.query,
+    mode: meta.mode,
+    type: 'upload_context',
+    parentId: pageId,
+    parentClick: null,
+    intent: page.intent,
+  };
+  pageMeta[pageId] = { ...meta, contextPageId: contextId };
+  saveMetadata(pageMeta);
+  setAnalysisStage(pageId, 'context', 'ready', { contextPageId: contextId, source: 'classified' });
+  console.log(`[context] ${pageId}: synthesized from classified payload`);
+  return page;
+}
+
+// ── Call 2 — text-only Concept Synthesis ──
+// After Call 1 (classify) returns the structured payload with transcript +
+// visual_layout + description_markdown, we run a SEPARATE text-only call to
+// produce the Concepts/explanation body (Overview · Key Components · How
+// It Works · Context & Significance · Key Takeaways). This call carries no
+// image — just the extracted text from Call 1 — so it runs on the same
+// llama-server slot pool but costs far fewer tokens than a vision call.
+
+async function runConceptSynthesisForPage(pageId) {
+  const existing = loadAnalysis(pageId);
+  if (existing?.explanation) {
+    setAnalysisStage(pageId, 'synthesis', 'ready', { explanationSource: existing.explanationSource });
+    return existing.explanation;
+  }
+  const classified = existing?.classified;
+  if (!classified || classified.fallback_used) {
+    setAnalysisStage(pageId, 'synthesis', 'error', { error: 'No classified payload — cannot synthesize.' });
+    return null;
+  }
+
+  const sourceParts = [
+    classified.transcript?.trim() && `## Extracted Text\n${classified.transcript.trim()}`,
+    classified.visual_layout?.trim() && `## Visual Layout\n${classified.visual_layout.trim()}`,
+    classified.visual_summary?.trim() && `## Visual Summary\n${classified.visual_summary.trim()}`,
+    existing?.description?.trim() && `## Visual Description\n${existing.description.trim()}`,
+  ].filter(Boolean).join('\n\n');
+
+  setAnalysisStage(pageId, 'synthesis', 'running');
+  const started = Date.now();
+
+  const systemPrompt = `You are an expert educator who explains complex concepts clearly. Given an extraction of an educational image (visible text, spatial layout, visual summary, and a literal visual description), synthesize a thorough explanation for a learner encountering this subject for the first time. Ground every claim in the source extraction below. Never invent details not present in the source — if information is missing, say so rather than guessing.`;
+
+  const userPrompt = `Below is the extracted information about an educational image. The image itself is not attached — work strictly from the text.
+
+Produce a Markdown explanation with these exact sections:
+
+## Overview
+What is this image teaching? 2-3 sentences.
+
+## Key Components
+For EACH labeled element, object, region, or notable feature in the extraction:
+- **[Name/Label]**: what it is, what it does, and why it matters in this context.
+
+Be thorough — cover every component named in the extraction.
+
+## How It Works
+Explain the process, relationship, or story. How do components connect? What sequence or flow is depicted?
+
+## Context & Significance
+Why does this matter? What broader concepts does this connect to? What would a student want to explore next?
+
+## Key Takeaways
+3-5 bullet points summarizing the most important things a learner should remember.
+
+Source extraction:
+
+${sourceParts || '(empty)'}
+
+Return only the Markdown body. No code fences, no preamble.`;
+
+  const cfg = modelConfig.explanation || modelConfig.analysis || { provider: 'local', model: 'auto' };
+  const provider = cfg.provider || 'local';
+  const model = (cfg.model && cfg.model !== 'auto') ? cfg.model : 'gemma-4-E4B';
+
+  try {
+    // callTextChat returns the raw text string (not an object).
+    const text = await callTextChat(provider, model, systemPrompt, userPrompt);
+    const elapsed = Date.now() - started;
+    const fresh = loadAnalysis(pageId) || existing || {};
+    fresh.explanation = text;
+    fresh.explanationAt = new Date().toISOString();
+    fresh.explanationSource = `synthesis (text-only, ${provider}/${model}, ${elapsed}ms)`;
+    fresh.intake = {
+      ...(fresh.intake || {}),
+      synthesis: { status: 'ready', updatedAt: new Date().toISOString(), elapsedMs: elapsed },
+    };
+    saveAnalysis(pageId, fresh);
+    setAnalysisStage(pageId, 'synthesis', 'ready', { elapsedMs: elapsed });
+    console.log(`[synthesis] ${pageId}: ${elapsed}ms, ${(text || '').length} chars`);
+    return text;
+  } catch (err) {
+    console.error(`[synthesis] ${pageId} failed:`, err.message);
+    setAnalysisStage(pageId, 'synthesis', 'error', { error: err.message });
+    return null;
+  }
+}
+
+const synthesisInFlight = new Map();
+function enqueueSynthesis(pageId) {
+  if (synthesisInFlight.has(pageId)) return synthesisInFlight.get(pageId);
+  const p = runConceptSynthesisForPage(pageId)
+    .catch(err => {
+      console.error(`[synthesis] ${pageId} failed:`, err.message);
+      return null;
+    })
+    .finally(() => synthesisInFlight.delete(pageId));
+  synthesisInFlight.set(pageId, p);
   return p;
 }
 
@@ -2142,14 +2405,23 @@ function enqueueImageIntake(pageId, { includeContext = false, force = false } = 
   if (intakeInFlight.has(pageId)) return intakeInFlight.get(pageId);
   const p = (async () => {
     setAnalysisStage(pageId, 'intake', 'running');
+    // Call 1 — vision: classify writes .classified + .description and, for
+    // upload-root pages, the context page (no separate vision call).
     const classified = await enqueueClassify(pageId, { force });
+    // Call 2 — text-only synthesis: explanation/Concepts. Runs in parallel
+    // with the legacy generateUploadContextPage fallback (which is now a
+    // fast-path no-op when classified already wrote the context).
     const shouldBuildContext = includeContext || isUploadRootImage(pageId);
-    const context = shouldBuildContext ? await enqueueUploadContext(pageId) : null;
+    const [context, explanation] = await Promise.all([
+      shouldBuildContext ? enqueueUploadContext(pageId) : Promise.resolve(null),
+      classified && !classified.fallback_used ? enqueueSynthesis(pageId) : Promise.resolve(null),
+    ]);
     setAnalysisStage(pageId, 'intake', 'ready', {
       classified: Boolean(classified),
       context: Boolean(context),
+      explanation: Boolean(explanation),
     });
-    return { classified, context };
+    return { classified, context, explanation };
   })()
     .catch(err => {
       console.error(`[intake] ${pageId} failed:`, err.message);
@@ -2364,69 +2636,36 @@ app.post('/api/analysis/:pageId', async (req, res) => {
     return res.status(404).json({ error: 'Image file not found' });
   }
 
-  // Load existing analysis (may have one half already)
-  const existing = loadAnalysis(pageId) || { description: null, explanation: null };
-
+  // v2 pipeline (2026-05-15): analysis is no longer a live vision call.
+  // Description comes from Call 1 (classify → .description), explanation
+  // comes from Call 2 (runConceptSynthesisForPage → .explanation). This
+  // endpoint just *ensures* the right calls have run and returns the cache.
   try {
-    const runDescription = (type === 'description' || type === 'both') && !existing.description;
-    const runExplanation = (type === 'explanation' || type === 'both') && !existing.explanation;
+    let existing = loadAnalysis(pageId) || { description: null, explanation: null };
+    const wantDescription = type === 'description' || type === 'both';
+    const wantExplanation = type === 'explanation' || type === 'both';
 
-    if (runDescription) {
-      const cached = buildDescriptionFromCachedIntake(pageId, existing);
-      if (cached) {
-        existing.description = cached;
-        existing.descriptionAt = new Date().toISOString();
-        existing.descriptionSource = 'cached intake (no model call)';
-        saveAnalysis(pageId, existing);
-      }
+    if (wantDescription && !existing.description) {
+      await enqueueImageIntake(pageId);
+      existing = loadAnalysis(pageId) || existing;
     }
 
-    if (runExplanation) {
-      const cached = buildExplanationFromCachedIntake(pageId, existing);
-      if (cached) {
-        existing.explanation = cached;
-        existing.explanationAt = new Date().toISOString();
-        existing.explanationSource = 'cached intake (no model call)';
-        saveAnalysis(pageId, existing);
+    if (wantExplanation && !existing.explanation) {
+      // Synthesis needs the classified payload; intake produces it.
+      if (!existing.classified) {
+        await enqueueImageIntake(pageId);
+        existing = loadAnalysis(pageId) || existing;
       }
-    }
-
-    const stillNeedsDescription = (type === 'description' || type === 'both') && !existing.description;
-    const stillNeedsExplanation = (type === 'explanation' || type === 'both') && !existing.explanation;
-
-    if (stillNeedsDescription || stillNeedsExplanation) {
-      // Resize image for the vision model only when cached intake is not enough.
-      const resized = await sharp(imagePath)
-        .resize({ width: 1024, withoutEnlargement: true })
-        .png()
-        .toBuffer();
-      const imageBase64 = resized.toString('base64');
-
-      if (stillNeedsDescription) {
-        console.log(`[analysis] Generating description for ${pageId}...`);
-        const result = await analyzeImage(imageBase64, DESCRIPTION_SYSTEM, DESCRIPTION_PROMPT);
-        existing.description = result.text;
-        existing.descriptionAt = new Date().toISOString();
-        existing.descriptionSource = result.source;
-        saveAnalysis(pageId, existing);
-      }
-
-      if (stillNeedsExplanation) {
-        console.log(`[analysis] Generating explanation for ${pageId}...`);
-        const result = await analyzeImage(imageBase64, EXPLANATION_SYSTEM, EXPLANATION_PROMPT);
-        existing.explanation = result.text;
-        existing.explanationAt = new Date().toISOString();
-        existing.explanationSource = result.source;
-        saveAnalysis(pageId, existing);
+      if (existing.classified && !existing.classified.fallback_used) {
+        await enqueueSynthesis(pageId);
+        existing = loadAnalysis(pageId) || existing;
       }
     }
 
     res.json(existing);
   } catch (err) {
     console.error('Analysis error:', err.message);
-    // Save partial results even on error
-    saveAnalysis(pageId, existing);
-    res.status(500).json({ error: `Analysis failed: ${err.message}`, ...existing });
+    res.status(500).json({ error: `Analysis failed: ${err.message}` });
   }
 });
 
