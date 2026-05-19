@@ -18,7 +18,7 @@
   },
   "drillText": {
     "provider": "local",
-    "model": "auto"
+    "model": "gemma-4-E4B-it-Q4_K_S"
   },
   "allowClassifyCloudFallback": false
 }

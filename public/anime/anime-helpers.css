@@ -1,0 +1,83 @@
+:root {
+  /* UC Merced palette */
+  --anime-navy: #002856;
+  --anime-gold: #DAA900;
+  --anime-dark-gold: #8C6D00;
+
+  /* Timing tokens */
+  --anime-duration-fast: 240ms;
+  --anime-duration-base: 480ms;
+  --anime-duration-slow: 800ms;
+
+  /* Easing */
+  --anime-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --anime-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --anime-duration-fast: 0ms;
+    --anime-duration-base: 0ms;
+    --anime-duration-slow: 0ms;
+  }
+}
+
+/* Utility classes used by presets */
+.anime-char,
+.anime-word {
+  display: inline-block;
+  will-change: transform, opacity;
+}
+
+.anime-line {
+  display: block;
+  overflow: hidden;
+}
+
+.anime-mask {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+}
+
+.anime-mask::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--anime-navy);
+  transform-origin: right center;
+}
+
+.anime-highlight {
+  position: relative;
+  display: inline;
+  background-image: linear-gradient(transparent 60%, color-mix(in srgb, var(--anime-gold) 70%, transparent) 60%);
+  background-size: 0% 100%;
+  background-repeat: no-repeat;
+}
+
+.anime-underline {
+  position: relative;
+  display: inline-block;
+}
+
+.anime-underline::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 2px;
+  background: var(--anime-gold);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.anime-gradient-text {
+  background: linear-gradient(90deg, var(--anime-navy), var(--anime-gold), var(--anime-navy));
+  background-size: 200% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

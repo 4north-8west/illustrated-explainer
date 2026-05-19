@@ -25,6 +25,7 @@ if (!XAI_API_KEY) {
 }
 
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
+fs.mkdirSync(ANALYSIS_DIR, { recursive: true });
 
 // --- Page-to-folder mapping (persisted to disk) ---
 
@@ -1259,9 +1260,9 @@ app.post('/api/upload', async (req, res) => {
 
     console.log(`[upload] Saved: ${imagePath} (${pngBuffer.length} bytes)`);
 
-    // Fire-and-forget classification. The user gets the page back immediately;
-    // the classified payload becomes available shortly after via GET /api/classify/:pageId.
-    enqueueClassify(id);
+    // Fire-and-forget intake. The user gets the page back immediately; cached
+    // classification/context are persisted for future gallery/session loads.
+    enqueueImageIntake(id, { includeContext: true });
 
     res.json({
       page: {
@@ -1272,6 +1273,7 @@ app.post('/api/upload', async (req, res) => {
         parentClick: null,
         initialQuery: trimmedLabel,
         mode,
+        analysisStatus: analysisStatus(id),
       },
     });
   } catch (err) {
@@ -1287,10 +1289,18 @@ async function generateUploadContextPage(uploadPageIdValue) {
 
   const contextId = uploadContextPageId(uploadPageIdValue);
   const cached = loadPageContent(meta.folder, contextId);
-  if (cached) return cached;
+  if (cached) {
+    if (!meta.contextPageId) {
+      pageMeta[uploadPageIdValue] = { ...meta, contextPageId: contextId };
+      saveMetadata(pageMeta);
+    }
+    setAnalysisStage(uploadPageIdValue, 'context', 'ready', { contextPageId: contextId });
+    return cached;
+  }
 
   const imagePath = path.join(GENERATED_DIR, meta.folder, `${uploadPageIdValue}.png`);
   if (!fs.existsSync(imagePath)) throw new Error('Upload image file not found');
+  setAnalysisStage(uploadPageIdValue, 'context', 'running');
 
   const resized = await sharp(imagePath)
     .resize({ width: 1400, withoutEnlargement: true })
@@ -1348,6 +1358,7 @@ List the main concepts, variables, relationships, or data patterns the learner i
   };
   pageMeta[uploadPageIdValue] = { ...meta, contextPageId: contextId };
   saveMetadata(pageMeta);
+  setAnalysisStage(uploadPageIdValue, 'context', 'ready', { contextPageId: contextId, source: result.source });
   console.log(`[context] Saved upload context: ${pageJsonPath(meta.folder, contextId)}`);
   return page;
 }
@@ -1361,7 +1372,7 @@ app.get('/api/context/:pageId', (req, res) => {
   if (!meta) return res.status(404).json({ error: 'Page not found in metadata' });
   const contextId = meta.contextPageId || (meta.type === 'upload_context' ? pageId : null);
   const context = contextId ? loadPageContent(meta.folder, contextId) : findNearestUploadContext(pageId);
-  res.json({ page: context });
+  res.json({ page: context, inFlight: contextInFlight.has(pageId), analysisStatus: analysisStatus(pageId) });
 });
 
 app.post('/api/context/:pageId', async (req, res) => {
@@ -1371,7 +1382,7 @@ app.post('/api/context/:pageId', async (req, res) => {
   }
 
   try {
-    const page = await enqueueGeneration(() => generateUploadContextPage(pageId));
+    const page = await enqueueUploadContext(pageId);
     res.json({ page });
   } catch (err) {
     console.error('Context generation error:', err.message);
@@ -1521,6 +1532,7 @@ function pageFromMetadata(pageId) {
   // its existing default UI in that case.
   const cached = loadAnalysis(pageId);
   const c = cached?.classified;
+  const status = analysisStatus(pageId);
   const classifiedSlim = c && !c.fallback_used ? {
     category: c.category,
     confidence: c.category_confidence,
@@ -1536,8 +1548,9 @@ function pageFromMetadata(pageId) {
     initialQuery: meta.query || null,
     mode: meta.mode || 'illustration',
     intent: meta.intent || '',
-    contextPageId: meta.contextPageId || null,
+    contextPageId: meta.contextPageId || status.contextPageId || null,
     classified: classifiedSlim,
+    analysisStatus: status,
   };
 }
 
@@ -1583,13 +1596,16 @@ app.get('/api/page/:pageId/children', (req, res) => {
 
 app.post('/api/page', async (req, res) => {
   const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind, responseDepth: reqResponseDepth, language: reqLanguage } = req.body;
-  const responseKind = ['markdown', 'chart', 'table', 'diagram'].includes(reqResponseKind) ? reqResponseKind : 'image';
+  let responseKind = ['markdown', 'chart', 'table', 'diagram'].includes(reqResponseKind) ? reqResponseKind : 'image';
   const intent = typeof reqIntent === 'string' ? reqIntent.trim().slice(0, 500) : '';
   const responseDepth = ['extract', 'explain', 'teach'].includes(reqResponseDepth) ? reqResponseDepth : 'explain';
   const language = typeof reqLanguage === 'string' ? reqLanguage.trim().slice(0, 80) : '';
 
   const isFirst = typeof query === 'string';
   const isChild = typeof parentId === 'string' && parentClick && typeof parentClick.x === 'number' && typeof parentClick.y === 'number';
+  if (isChild && responseKind === 'image') {
+    responseKind = 'markdown';
+  }
 
   if (!isFirst && !isChild) {
     return res.status(400).json({ error: 'Provide either { query } or { parentId, parentClick: { x, y } }' });
@@ -1648,7 +1664,7 @@ app.post('/api/page', async (req, res) => {
       const imageUrl = `/generated/${folder}/${id}.png`;
 
       if (fs.existsSync(imagePath) && fs.statSync(imagePath).size > 0) {
-        return { id, type: 'image', imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode };
+        return { id, type: 'image', imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode, analysisStatus: analysisStatus(id) };
       }
 
       let imageBuffer;
@@ -1809,9 +1825,9 @@ app.post('/api/page', async (req, res) => {
 
       // Phase A: every image (first-page or drill child) gets classified in the
       // background so the next drill from this page can reuse the classification.
-      enqueueClassify(id);
+      enqueueImageIntake(id, { includeContext: isUploadRootImage(id) });
 
-      return { id, type: 'image', imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode };
+      return { id, type: 'image', imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode, analysisStatus: analysisStatus(id) };
     });
 
     res.json({ page });
@@ -1839,6 +1855,47 @@ function loadAnalysis(pageId) {
 
 function saveAnalysis(pageId, data) {
   fs.writeFileSync(analysisPath(pageId), JSON.stringify(data, null, 2));
+}
+
+function updateAnalysis(pageId, updater) {
+  const existing = loadAnalysis(pageId) || {};
+  const next = updater(existing) || existing;
+  saveAnalysis(pageId, next);
+  return next;
+}
+
+function setAnalysisStage(pageId, stage, status, extra = {}) {
+  updateAnalysis(pageId, existing => ({
+    ...existing,
+    intake: {
+      ...(existing.intake || {}),
+      [stage]: {
+        ...(existing.intake?.[stage] || {}),
+        status,
+        updatedAt: new Date().toISOString(),
+        ...extra,
+      },
+    },
+  }));
+}
+
+function analysisStatus(pageId) {
+  const analysis = loadAnalysis(pageId) || {};
+  const meta = pageMeta[pageId] || {};
+  const contextId = meta.contextPageId || uploadContextPageId(pageId);
+  const cachedContext = meta.folder ? loadPageContent(meta.folder, contextId) : null;
+  const contextReady = Boolean(cachedContext);
+  return {
+    classified: Boolean(analysis.classified && !analysis.classified.fallback_used),
+    context: contextReady,
+    intake: analysis.intake || null,
+    inFlight: {
+      classify: classifyInFlight.has(pageId),
+      context: contextInFlight.has(pageId),
+      intake: intakeInFlight.has(pageId),
+    },
+    contextPageId: contextReady ? contextId : null,
+  };
 }
 
 async function callVisionChat(provider, model, imageBase64, systemPrompt, userPrompt) {
@@ -1880,26 +1937,34 @@ async function callVisionChat(provider, model, imageBase64, systemPrompt, userPr
   const auth = providerConfig.authHeader();
   if (auth) headers['Authorization'] = auth;
 
-  const response = await fetch(chatUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      ...(provider !== 'local' ? { model } : {}),
-      messages: [
-        { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: [
-            { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}` } },
-            { type: 'text', text: userPrompt },
-          ],
-        },
-      ],
-      temperature: 0.3,
-      max_tokens: 4096,
-    }),
-    signal: AbortSignal.timeout(180000),
-  });
+  let response;
+  try {
+    response = await fetch(chatUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        ...(provider !== 'local' ? { model } : {}),
+        messages: [
+          { role: 'system', content: systemPrompt },
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}` } },
+              { type: 'text', text: userPrompt },
+            ],
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 4096,
+      }),
+      signal: AbortSignal.timeout(180000),
+    });
+  } catch (err) {
+    if (provider === 'local') {
+      throw new Error(`Local vision model endpoint is not reachable at ${chatUrl}. Start the local model server or use cached intake analysis.`);
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     const err = await response.text();
@@ -1959,10 +2024,30 @@ async function analyzeImageForClassify(systemPrompt, userPrompt, imageBase64) {
 // _analysis/<pageId>.json under the .classified field, alongside the existing
 // description/explanation fields (which are unaffected).
 const classifyInFlight = new Map(); // pageId -> Promise (deduplicates concurrent triggers)
+const contextInFlight = new Map();  // pageId -> Promise
+const intakeInFlight = new Map();   // pageId -> Promise
+let intakeQueue = Promise.resolve();
 
-async function runClassifyForPage(pageId) {
+function isUploadRootImage(pageId) {
+  const meta = pageMeta[pageId];
+  return Boolean(meta?.type === 'image' && !meta.parentId && String(meta.folder || '').startsWith('upload-'));
+}
+
+function enqueueIntakeWork(fn) {
+  intakeQueue = intakeQueue.then(fn, fn);
+  return intakeQueue;
+}
+
+async function runClassifyForPage(pageId, { force = false } = {}) {
   const meta = pageMeta[pageId];
   if (!meta || meta.type !== 'image') return null;
+  const existingBefore = loadAnalysis(pageId);
+  if (!force && existingBefore?.classified) {
+    setAnalysisStage(pageId, 'classify', existingBefore.classified.fallback_used ? 'fallback' : 'ready', {
+      classifiedAt: existingBefore.classifiedAt || existingBefore.classified.classified_at,
+    });
+    return existingBefore.classified;
+  }
   const imagePath = path.join(GENERATED_DIR, meta.folder, `${pageId}.png`);
   if (!fs.existsSync(imagePath)) {
     console.warn(`[classify] ${pageId}: image file not found at ${imagePath}`);
@@ -1975,12 +2060,29 @@ async function runClassifyForPage(pageId) {
     : 'gemma-4-E4B';
 
   const started = Date.now();
+  setAnalysisStage(pageId, 'classify', 'running', {
+    provider: modelConfig.classify?.provider || 'local',
+    model: modelConfig.classify?.model || 'auto',
+    startedAt: new Date(started).toISOString(),
+  });
   const payload = await classifyImage(imageBase64, analyzeImageForClassify, modelName);
   const elapsed = Date.now() - started;
 
   const existing = loadAnalysis(pageId) || {};
   existing.classified = payload;
   existing.classifiedAt = payload.classified_at;
+  existing.intake = {
+    ...(existing.intake || {}),
+    classify: {
+      ...(existing.intake?.classify || {}),
+      status: payload.fallback_used ? 'fallback' : 'ready',
+      updatedAt: new Date().toISOString(),
+      elapsedMs: elapsed,
+      category: payload.category,
+      confidence: payload.category_confidence,
+      fallbackReason: payload.fallback_reason || null,
+    },
+  };
   saveAnalysis(pageId, existing);
 
   if (payload.fallback_used) {
@@ -1998,15 +2100,64 @@ async function runClassifyForPage(pageId) {
   return payload;
 }
 
-function enqueueClassify(pageId) {
+function enqueueClassify(pageId, options = {}) {
   if (classifyInFlight.has(pageId)) return classifyInFlight.get(pageId);
-  const p = runClassifyForPage(pageId)
+  const p = enqueueIntakeWork(() => runClassifyForPage(pageId, options))
     .catch(err => {
       console.error(`[classify] ${pageId} failed:`, err.message);
+      setAnalysisStage(pageId, 'classify', 'error', { error: err.message });
       return null;
     })
     .finally(() => classifyInFlight.delete(pageId));
   classifyInFlight.set(pageId, p);
+  return p;
+}
+
+function enqueueUploadContext(pageId) {
+  if (contextInFlight.has(pageId)) return contextInFlight.get(pageId);
+  const meta = pageMeta[pageId];
+  if (!meta || meta.type !== 'image') return Promise.resolve(null);
+  const contextId = meta.contextPageId || uploadContextPageId(pageId);
+  const cached = loadPageContent(meta.folder, contextId);
+  if (cached) {
+    if (!meta.contextPageId) {
+      pageMeta[pageId] = { ...meta, contextPageId: contextId };
+      saveMetadata(pageMeta);
+    }
+    setAnalysisStage(pageId, 'context', 'ready', { contextPageId: contextId });
+    return Promise.resolve(cached);
+  }
+  const p = enqueueIntakeWork(() => generateUploadContextPage(pageId))
+    .catch(err => {
+      console.error(`[context] ${pageId} failed:`, err.message);
+      setAnalysisStage(pageId, 'context', 'error', { error: err.message });
+      return null;
+    })
+    .finally(() => contextInFlight.delete(pageId));
+  contextInFlight.set(pageId, p);
+  return p;
+}
+
+function enqueueImageIntake(pageId, { includeContext = false, force = false } = {}) {
+  if (intakeInFlight.has(pageId)) return intakeInFlight.get(pageId);
+  const p = (async () => {
+    setAnalysisStage(pageId, 'intake', 'running');
+    const classified = await enqueueClassify(pageId, { force });
+    const shouldBuildContext = includeContext || isUploadRootImage(pageId);
+    const context = shouldBuildContext ? await enqueueUploadContext(pageId) : null;
+    setAnalysisStage(pageId, 'intake', 'ready', {
+      classified: Boolean(classified),
+      context: Boolean(context),
+    });
+    return { classified, context };
+  })()
+    .catch(err => {
+      console.error(`[intake] ${pageId} failed:`, err.message);
+      setAnalysisStage(pageId, 'intake', 'error', { error: err.message });
+      return null;
+    })
+    .finally(() => intakeInFlight.delete(pageId));
+  intakeInFlight.set(pageId, p);
   return p;
 }
 
@@ -2049,6 +2200,91 @@ Why does this matter? What broader concepts does this connect to? What would a s
 ## Key Takeaways
 3-5 bullet points summarizing the most important things a learner should remember from this image.`;
 
+function sectionFromMarkdown(markdown, names) {
+  const body = String(markdown || '');
+  const wanted = names.map(name => name.toLowerCase());
+  const matches = [...body.matchAll(/^##\s+(.+?)\s*$/gmi)];
+  for (let i = 0; i < matches.length; i++) {
+    const heading = matches[i][1].trim().toLowerCase();
+    if (!wanted.includes(heading)) continue;
+    const start = matches[i].index + matches[i][0].length;
+    const end = i + 1 < matches.length ? matches[i + 1].index : body.length;
+    return body.slice(start, end).trim();
+  }
+  return '';
+}
+
+function cachedContextForPage(pageId) {
+  const meta = pageMeta[pageId];
+  if (!meta) return null;
+  const contextId = meta.contextPageId || uploadContextPageId(pageId);
+  return loadPageContent(meta.folder, contextId) || findNearestUploadContext(pageId);
+}
+
+function listItems(items) {
+  return (items || []).filter(Boolean).map(item => `- ${item}`).join('\n');
+}
+
+function buildDescriptionFromCachedIntake(pageId, analysis) {
+  const classified = analysis?.classified && !analysis.classified.fallback_used ? analysis.classified : null;
+  const context = cachedContextForPage(pageId);
+  if (!classified && !context?.content) return null;
+
+  const contextType = sectionFromMarkdown(context?.content, ['Image Type']);
+  const contextStructure = sectionFromMarkdown(context?.content, ['Structure']);
+  const contextTranscript = sectionFromMarkdown(context?.content, ['OCR / Transcription', 'Transcription', 'Extracted Text']);
+  const summary = classified?.visual_summary || contextStructure || contextType || 'Cached source context describes this image.';
+  const transcript = classified?.transcript || contextTranscript || 'No visible text transcript is cached.';
+  const style = classified?.style?.descriptor || contextType || 'No detailed style description is cached.';
+
+  return `## Visual Description
+${summary}
+
+${contextStructure ? `### Layout\n${contextStructure}\n` : ''}
+## Text Content
+${transcript}
+
+## Image Type & Style
+${classified ? `Category: ${classified.category} (${Math.round(Number(classified.category_confidence || 0) * 100)}% confidence). ${classified.category_rationale || ''}` : contextType}
+
+${style}`;
+}
+
+function buildExplanationFromCachedIntake(pageId, analysis) {
+  const classified = analysis?.classified && !analysis.classified.fallback_used ? analysis.classified : null;
+  const context = cachedContextForPage(pageId);
+  if (!classified && !context?.content) return null;
+
+  const concepts = sectionFromMarkdown(context?.content, ['Key Concepts']);
+  const structure = sectionFromMarkdown(context?.content, ['Structure']);
+  const hints = classified?.drill_hints || {};
+  const details = classified?.general?.notable_details || classified?.event_flyer?.key_calls_to_action || [];
+  const subjects = classified?.general?.subjects || [];
+  const takeaways = [
+    classified?.visual_summary,
+    concepts,
+    details.length ? listItems(details) : '',
+    hints.suggested_intents?.length ? `Good follow-up questions:\n${listItems(hints.suggested_intents)}` : '',
+  ].filter(Boolean);
+
+  return `## Overview
+${classified?.visual_summary || concepts || 'Cached intake analysis summarizes the main educational content in this image.'}
+
+## Key Components
+${subjects.length ? listItems(subjects.map(item => `**${item}**`)) : ''}
+${details.length ? listItems(details) : ''}
+${structure ? `\n${structure}` : ''}
+
+## How It Works
+${classified?.general?.likely_purpose || classified?.event_flyer?.tagline || 'The image combines visible text, layout, and visual emphasis to guide the learner toward the main topic.'}
+
+## Context & Significance
+${concepts || classified?.category_rationale || 'This cached explanation is derived from the previously saved intake analysis, so it avoids a new model call.'}
+
+## Key Takeaways
+${takeaways.length ? listItems(takeaways.slice(0, 5)) : '- Cached intake is available, but it does not contain detailed takeaways.'}`;
+}
+
 app.get('/api/analysis/:pageId', (req, res) => {
   const { pageId } = req.params;
   if (!(/^[a-f0-9]{16}$/.test(pageId))) {
@@ -2085,12 +2321,30 @@ app.post('/api/classify/:pageId', async (req, res) => {
     if (cached?.classified) return res.json({ classified: cached.classified, cached: true });
   }
   try {
-    const payload = await enqueueClassify(pageId);
+    const payload = await enqueueClassify(pageId, { force });
     if (!payload) return res.status(500).json({ error: 'Classification produced no result (see server logs).' });
     res.json({ classified: payload, cached: false });
   } catch (err) {
     res.status(500).json({ error: `Classification failed: ${err.message}` });
   }
+});
+
+app.get('/api/intake/:pageId', (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) return res.status(400).json({ error: 'Invalid page ID' });
+  if (!pageMeta[pageId]) return res.status(404).json({ error: 'Page not found' });
+  res.json({ analysisStatus: analysisStatus(pageId) });
+});
+
+app.post('/api/intake/:pageId', (req, res) => {
+  const { pageId } = req.params;
+  if (!(/^[a-f0-9]{16}$/.test(pageId))) return res.status(400).json({ error: 'Invalid page ID' });
+  const meta = pageMeta[pageId];
+  if (!meta) return res.status(404).json({ error: 'Page not found' });
+  if (meta.type !== 'image') return res.status(400).json({ error: 'Only image pages have intake jobs' });
+  const includeContext = req.body?.includeContext === true || isUploadRootImage(pageId);
+  enqueueImageIntake(pageId, { includeContext, force: req.body?.force === true });
+  res.json({ analysisStatus: analysisStatus(pageId), queued: true });
 });
 
 app.post('/api/analysis/:pageId', async (req, res) => {
@@ -2114,32 +2368,57 @@ app.post('/api/analysis/:pageId', async (req, res) => {
   const existing = loadAnalysis(pageId) || { description: null, explanation: null };
 
   try {
-    // Resize image for the vision model (keep it reasonable for local inference)
-    const resized = await sharp(imagePath)
-      .resize({ width: 1024, withoutEnlargement: true })
-      .png()
-      .toBuffer();
-    const imageBase64 = resized.toString('base64');
-
     const runDescription = (type === 'description' || type === 'both') && !existing.description;
     const runExplanation = (type === 'explanation' || type === 'both') && !existing.explanation;
 
     if (runDescription) {
-      console.log(`[analysis] Generating description for ${pageId}...`);
-      const result = await analyzeImage(imageBase64, DESCRIPTION_SYSTEM, DESCRIPTION_PROMPT);
-      existing.description = result.text;
-      existing.descriptionAt = new Date().toISOString();
-      existing.descriptionSource = result.source;
-      saveAnalysis(pageId, existing);
+      const cached = buildDescriptionFromCachedIntake(pageId, existing);
+      if (cached) {
+        existing.description = cached;
+        existing.descriptionAt = new Date().toISOString();
+        existing.descriptionSource = 'cached intake (no model call)';
+        saveAnalysis(pageId, existing);
+      }
     }
 
     if (runExplanation) {
-      console.log(`[analysis] Generating explanation for ${pageId}...`);
-      const result = await analyzeImage(imageBase64, EXPLANATION_SYSTEM, EXPLANATION_PROMPT);
-      existing.explanation = result.text;
-      existing.explanationAt = new Date().toISOString();
-      existing.explanationSource = result.source;
-      saveAnalysis(pageId, existing);
+      const cached = buildExplanationFromCachedIntake(pageId, existing);
+      if (cached) {
+        existing.explanation = cached;
+        existing.explanationAt = new Date().toISOString();
+        existing.explanationSource = 'cached intake (no model call)';
+        saveAnalysis(pageId, existing);
+      }
+    }
+
+    const stillNeedsDescription = (type === 'description' || type === 'both') && !existing.description;
+    const stillNeedsExplanation = (type === 'explanation' || type === 'both') && !existing.explanation;
+
+    if (stillNeedsDescription || stillNeedsExplanation) {
+      // Resize image for the vision model only when cached intake is not enough.
+      const resized = await sharp(imagePath)
+        .resize({ width: 1024, withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      const imageBase64 = resized.toString('base64');
+
+      if (stillNeedsDescription) {
+        console.log(`[analysis] Generating description for ${pageId}...`);
+        const result = await analyzeImage(imageBase64, DESCRIPTION_SYSTEM, DESCRIPTION_PROMPT);
+        existing.description = result.text;
+        existing.descriptionAt = new Date().toISOString();
+        existing.descriptionSource = result.source;
+        saveAnalysis(pageId, existing);
+      }
+
+      if (stillNeedsExplanation) {
+        console.log(`[analysis] Generating explanation for ${pageId}...`);
+        const result = await analyzeImage(imageBase64, EXPLANATION_SYSTEM, EXPLANATION_PROMPT);
+        existing.explanation = result.text;
+        existing.explanationAt = new Date().toISOString();
+        existing.explanationSource = result.source;
+        saveAnalysis(pageId, existing);
+      }
     }
 
     res.json(existing);

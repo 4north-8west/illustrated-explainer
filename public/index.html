@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Illustrated Explainer</title>
+<link rel="stylesheet" href="anime/anime-helpers.css">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Georgia', serif; background: #faf8f5; color: #333; height: 100vh; min-height: 620px; display: flex; flex-direction: column; overflow: hidden; }
@@ -459,6 +460,7 @@ const $ = id => document.getElementById(id);
 const SESSION_KEY = 'illustratedExplainer.session.v1';
 const sourceContextCache = {}; // pageId -> source context page or null
 const sourceContextRequests = {}; // pageId -> Promise
+const sourceContextState = new Map(); // pageId -> pending | unavailable
 const inlineAnalysisRequests = {}; // pageId -> Promise
 
 function escapeHtml(text) {
@@ -684,6 +686,17 @@ async function loadModes() {
   }
 }
 
+function safePrimaryDrillKind(kind) {
+  return kind === 'image' ? 'markdown' : kind;
+}
+
+function labelForPrimaryDrill(kind, suggestedLabel) {
+  if (kind === 'markdown' && suggestedLabel && /image|drill|explore/i.test(suggestedLabel)) {
+    return 'Analyze region';
+  }
+  return suggestedLabel || (kind === 'markdown' ? 'Analyze region' : 'Drill in');
+}
+
 function setLoading(loading) {
   state.loading = loading;
   $('topicInput').disabled = loading;
@@ -776,9 +789,141 @@ async function fetchSavedPage(pageId) {
 // On a successful arrival, the entry is removed (page.classified now carries
 // the slim subset) and a re-render swaps skeletons for real content.
 const _classifyState = new Map();
+const _intakeRequested = new Set();
+
+function isUploadRootPage(page) {
+  return Boolean(page?.type === 'image' && !page.parentId && String(page.imageUrl || '').includes('/generated/upload-'));
+}
+
+function needsIntake(page) {
+  if (!page || page.type !== 'image') return false;
+  const status = page.analysisStatus || {};
+  if (status.inFlight?.intake || status.inFlight?.classify || status.inFlight?.context) return false;
+  if (status.intake?.classify?.status === 'error' || status.intake?.classify?.status === 'fallback') return false;
+  if (isUploadRootPage(page) && status.intake?.context?.status === 'error') return false;
+  if (!page.classified && !status.classified) return true;
+  if (isUploadRootPage(page) && !status.context && !page.contextPageId && !status.contextPageId) return true;
+  return false;
+}
+
+function ensureIntakeQueued(page) {
+  if (!needsIntake(page) || _intakeRequested.has(page.id)) return;
+  _intakeRequested.add(page.id);
+  const wantsContext = isUploadRootPage(page) && !page.contextPageId && !page.analysisStatus?.contextPageId;
+  if (wantsContext) {
+    sourceContextState.set(page.id, 'pending');
+    setTimeout(() => {
+      if (sourceContextCache[page.id] === undefined) {
+        sourceContextState.delete(page.id);
+        loadSourceContext(page.id);
+      }
+    }, 4000);
+  }
+  fetch(`/api/intake/${page.id}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ includeContext: isUploadRootPage(page) }),
+  })
+    .then(res => res.ok ? res.json() : null)
+    .then(data => {
+      if (data?.analysisStatus) {
+        const idx = state.pages.findIndex(p => p.id === page.id);
+        if (idx !== -1) state.pages[idx] = { ...state.pages[idx], analysisStatus: data.analysisStatus };
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      if (state.pages[state.currentIndex]?.id === page.id) renderCurrentPage();
+    });
+}
+
+async function refreshSavedPageState(pageId) {
+  const fresh = await fetchSavedPage(pageId);
+  if (!fresh) return null;
+  const idx = state.pages.findIndex(p => p.id === pageId);
+  if (idx !== -1) {
+    state.pages[idx] = {
+      ...state.pages[idx],
+      ...fresh,
+    };
+    saveSession();
+  }
+  return fresh;
+}
+
+function pollIntakeUntilSettled(pageId, attempts = 0) {
+  setTimeout(async () => {
+    try {
+      const fresh = await refreshSavedPageState(pageId);
+      const status = fresh?.analysisStatus || {};
+      if (status.classified) {
+        _classifyState.delete(pageId);
+        loadFullClassified(pageId);
+      }
+      if (status.context || status.contextPageId || fresh?.contextPageId) {
+        sourceContextState.delete(pageId);
+        delete sourceContextCache[pageId];
+        loadSourceContext(pageId);
+      }
+      const stillRunning = status.inFlight?.intake || status.inFlight?.classify || status.inFlight?.context;
+      if (state.pages[state.currentIndex]?.id === pageId) {
+        renderCurrentPage();
+        updateUI();
+      }
+      if (stillRunning && attempts < 30) pollIntakeUntilSettled(pageId, attempts + 1);
+    } catch (err) {
+      if (attempts < 5) pollIntakeUntilSettled(pageId, attempts + 1);
+    }
+  }, attempts === 0 ? 1200 : 4000);
+}
+
+async function retryImageIntake(pageId) {
+  const page = state.pages.find(p => p.id === pageId);
+  if (!page || page.type !== 'image') return;
+  clearError();
+  showStatus('Retrying image analysis...');
+  delete fullClassifiedCache[pageId];
+  delete sourceContextCache[pageId];
+  delete sourceContextRequests[pageId];
+  _classifyState.delete(pageId);
+  _intakeRequested.delete(pageId);
+  sourceContextState.set(pageId, 'pending');
+  try {
+    const res = await fetch(`/api/intake/${pageId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ includeContext: isUploadRootPage(page), force: true }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || `Error ${res.status}`);
+    }
+    const data = await res.json();
+    const idx = state.pages.findIndex(p => p.id === pageId);
+    if (idx !== -1 && data.analysisStatus) {
+      state.pages[idx] = { ...state.pages[idx], analysisStatus: data.analysisStatus };
+    }
+    renderCurrentPage();
+    updateUI();
+    pollIntakeUntilSettled(pageId);
+  } catch (err) {
+    sourceContextState.delete(pageId);
+    showError('Analysis retry failed: ' + err.message);
+    renderCurrentPage();
+    updateUI();
+  } finally {
+    setTimeout(clearStatus, 2500);
+  }
+}
 
 function ensureClassifiedRefreshed(pageId) {
   if (!pageId || _classifyState.has(pageId)) return;
+  const page = state.pages.find(p => p.id === pageId);
+  const classifyStage = page?.analysisStatus?.intake?.classify;
+  if ((classifyStage?.status === 'error' || classifyStage?.status === 'fallback') && !page?.analysisStatus?.inFlight?.classify) {
+    _classifyState.set(pageId, 'unavailable');
+    return;
+  }
   // Optimistic: assume something is coming. The first GET will downgrade to
   // 'unavailable' fast if the server isn't classifying this image.
   _classifyState.set(pageId, 'pending');
@@ -1168,6 +1313,30 @@ function renderClassifiedRightSkeleton() {
   </section>`;
 }
 
+function renderAnalysisUnavailablePanel(page) {
+  const status = page?.analysisStatus || {};
+  const classifyStage = status.intake?.classify || {};
+  const contextStage = status.intake?.context || {};
+  const messages = [
+    classifyStage.fallbackReason || classifyStage.error,
+    contextStage.error,
+  ].filter(Boolean);
+  const detail = messages.length
+    ? messages.map(msg => `<li>${escapeHtml(msg)}</li>`).join('')
+    : '<li>No persisted analysis is available for this image yet.</li>';
+  return `<section class="source-panel cat-card">
+    <h2>Analysis unavailable</h2>
+    <div class="source-content">
+      <p>The image is saved, but the side-panel analysis could not be loaded from cache and the local vision model is not available.</p>
+      <ul class="card-list">${detail}</ul>
+      <div class="inline-analysis-actions">
+        <button type="button" data-retry-intake="${escapeHtml(page?.id || '')}">Retry analysis</button>
+      </div>
+      <p class="cat-rationale">Start the local vision model, then retry analysis. Existing cached images will still load without model calls.</p>
+    </div>
+  </section>`;
+}
+
 function renderDrillHintsPreview(hints) {
   if (!hints || (!hints.suggested_intents?.length && !hints.regions_of_interest?.length)) return '';
   const intents = (hints.suggested_intents || []).slice(0, 4).map(i =>
@@ -1344,10 +1513,29 @@ function drillResultPanel(selection) {
 
 function loadSourceContext(pageId) {
   if (!pageId || sourceContextCache[pageId] !== undefined || sourceContextRequests[pageId]) return;
+  if (sourceContextState.get(pageId) === 'pending') return;
   sourceContextRequests[pageId] = fetch(`/api/context/${pageId}`)
     .then(res => res.ok ? res.json() : { page: null })
-    .then(data => { sourceContextCache[pageId] = data.page || null; })
-    .catch(() => { sourceContextCache[pageId] = null; })
+    .then(data => {
+      if (data.page) {
+        sourceContextCache[pageId] = data.page;
+        sourceContextState.delete(pageId);
+        return;
+      }
+      if (data.inFlight || data.analysisStatus?.inFlight?.context || data.analysisStatus?.inFlight?.intake) {
+        sourceContextState.set(pageId, 'pending');
+        setTimeout(() => {
+          if (sourceContextCache[pageId] === undefined) {
+            sourceContextState.delete(pageId);
+            loadSourceContext(pageId);
+          }
+        }, 4000);
+      } else {
+        sourceContextCache[pageId] = null;
+        sourceContextState.set(pageId, 'unavailable');
+      }
+    })
+    .catch(() => { sourceContextCache[pageId] = null; sourceContextState.set(pageId, 'unavailable'); })
     .finally(() => {
       delete sourceContextRequests[pageId];
       if (state.pages[state.currentIndex]?.id === pageId) {
@@ -1360,13 +1548,13 @@ function loadSourceContext(pageId) {
 const EMPTY_STATE_HTML = `
   <div class="empty-state">
     <div class="empty-state-cards">
-      <div class="empty-card generate">
+      <div class="empty-card generate" data-anime="fade-up" data-anime-delay="0">
         <span class="empty-card-icon">✏️</span>
         <h3>Generate from a topic</h3>
         <p>Type any subject above and we'll illustrate it. Click any region of the image to drill in deeper — image, text, chart, table, or diagram.</p>
         <div class="empty-card-cta"><button type="button" data-empty-action="focus-input">Type a topic →</button></div>
       </div>
-      <div class="empty-card upload">
+      <div class="empty-card upload" data-anime="fade-up" data-anime-delay="150">
         <span class="empty-card-icon">⬆️</span>
         <h3>Upload your own image</h3>
         <p>Drop in a diagram, photo, or screenshot to start drilling into specific regions for accessible analysis and explanation.</p>
@@ -1398,6 +1586,7 @@ function renderCurrentPage() {
   // Lazy-load any persisted drill descendants so previously-created drill
   // targets are visible even after a session restore or gallery reload.
   if (page.type === 'image') ensureDescendantsLoaded(page.id);
+  if (page.type === 'image') ensureIntakeQueued(page);
 
   // Phase A.3: when an image hasn't been classified yet, poll once after a
   // short delay to pick up the result of the background classify pass that
@@ -1545,7 +1734,8 @@ function renderCurrentPage() {
   loadInlineAnalysis(page.id);
   // Phase B: when the page is classified, fetch the full structured payload
   // so the side panels can render its transcript / category card / drill hints.
-  if (page.classified) loadFullClassified(page.id);
+  const hasCachedClassification = Boolean(page.classified || page.analysisStatus?.classified);
+  if (hasCachedClassification) loadFullClassified(page.id);
   const fullClassified = fullClassifiedCache[page.id] || null;
   const drillGroups = drillGroupsForPage(page.id);
   const activeDrill = activeDrillSelection(page.id, drillGroups);
@@ -1610,13 +1800,15 @@ function renderCurrentPage() {
     if (img.complete) placeMarker(); else img.onload = placeMarker;
     requestAnimationFrame(placeMarker);
 
-    // Confirm bar — when the parent image is classified (Phase A.3), the
-    // primary button label/action come from drill_hints.suggested_default.
-    // The "Drill as text ▾" popover always shows the alternatives (whichever
-    // option is currently primary is omitted to avoid duplication).
+    // Confirm bar - classification suggests a default output, but image-style
+    // drill suggestions route through the vision/text path for click-based drill.
+    // Explicit image generation/editing remains a separate feature.
     const drillHints = page.classified?.drill_hints || null;
-    const primaryKind = drillHints?.suggested_default || 'image';
-    const primaryLabel = drillHints?.suggested_default_label || 'Drill into image';
+    const suggestedKind = drillHints?.suggested_default || 'image';
+    const primaryKind = safePrimaryDrillKind(suggestedKind);
+    const primaryLabel = suggestedKind === 'image'
+      ? 'Analyze region'
+      : labelForPrimaryDrill(primaryKind, drillHints?.suggested_default_label);
 
     const bar = document.createElement('div');
     bar.className = 'confirm-bar';
@@ -1673,17 +1865,16 @@ function renderCurrentPage() {
     goBtn.className = 'btn confirm-go';
     goBtn.textContent = primaryLabel;
     goBtn.title = drillHints
-      ? `Suggested for this image (category: ${page.classified.category})`
-      : 'Generate a deeper illustration of this region';
+      ? `Analyze the selected image region with the vision model (category: ${page.classified.category})`
+      : 'Analyze the selected image region with the vision model';
     goBtn.onclick = () => commit(primaryKind);
 
     // Alternatives popover: shows every kind EXCEPT the one that's primary
     const allOptions = [
-      { kind: 'image',    label: 'Drill into image', desc: 'Generate a deeper illustration of this region' },
-      { kind: 'markdown', label: 'Explanation',      desc: 'Long-form prose answering "what is this?"' },
-      { kind: 'chart',    label: 'Chart',            desc: 'Quantitative summary as a small chart' },
-      { kind: 'table',    label: 'Table',            desc: 'Structured comparison or inventory' },
-      { kind: 'diagram',  label: 'Diagram',          desc: 'Schematic relationship or flow' },
+      { kind: 'markdown', label: 'Explanation', desc: 'Send the selected image region to the vision model for a prose explanation' },
+      { kind: 'chart', label: 'Chart', desc: 'Send the selected image region to the vision model for a quantitative summary' },
+      { kind: 'table', label: 'Table', desc: 'Send the selected image region to the vision model for structured extraction' },
+      { kind: 'diagram', label: 'Diagram', desc: 'Send the selected image region to the vision model for a schematic explanation' },
     ];
     const otherOptions = allOptions.filter(o => o.kind !== primaryKind);
 
@@ -1691,8 +1882,8 @@ function renderCurrentPage() {
     textWrap.className = 'drill-text-wrap';
     const textTrigger = document.createElement('button');
     textTrigger.className = 'btn drill-text-trigger';
-    textTrigger.textContent = primaryKind === 'image' ? 'Drill as text' : 'Other format';
-    textTrigger.title = 'Generate this region in a different format';
+    textTrigger.textContent = 'Other format';
+    textTrigger.title = 'Analyze this image region in a different output format';
     textTrigger.onclick = (ev) => {
       ev.stopPropagation();
       textWrap.classList.toggle('open');
@@ -1743,8 +1934,32 @@ function renderCurrentPage() {
   // When pending, the side panels show shimmer placeholders so the
   // transition into the populated layout is graceful instead of abrupt.
   const classifyState = page.type === 'image' ? _classifyState.get(page.id) : null;
-  const isPending = classifyState === 'pending' && !fullClassified;
-  if (sourceContext?.content || fullClassified || isPending) {
+  const sourceContextPending = sourceContextState.get(page.id) === 'pending';
+  const fullClassifiedResolved = Object.prototype.hasOwnProperty.call(fullClassifiedCache, page.id);
+  const sourceContextResolved = sourceContextCache[page.id] !== undefined;
+  const classifyStage = page.analysisStatus?.intake?.classify;
+  const contextStage = page.analysisStatus?.intake?.context;
+  const analysisUnavailable = Boolean(
+    !fullClassified &&
+    !sourceContext?.content &&
+    (
+      classifyStage?.status === 'error' ||
+      classifyStage?.status === 'fallback' ||
+      contextStage?.status === 'error'
+    )
+  );
+  const persistedPanelData = Boolean(
+    hasCachedClassification ||
+    page.contextPageId ||
+    page.analysisStatus?.context ||
+    page.analysisStatus?.contextPageId
+  );
+  const isPending = (
+    (classifyState === 'pending' && !fullClassified) ||
+    sourceContextPending ||
+    (persistedPanelData && !fullClassified && !fullClassifiedResolved && !sourceContextResolved)
+  );
+  if (sourceContext?.content || fullClassified || isPending || analysisUnavailable) {
     const analysis = learnCache[page.id] || {};
     const layout = document.createElement('div');
     layout.className = 'source-layout';
@@ -1756,6 +1971,8 @@ function renderCurrentPage() {
       leftParts.push(renderClassifiedLeftPanel(fullClassified));
     } else if (isPending) {
       leftParts.push(renderClassifiedLeftSkeleton());
+    } else if (analysisUnavailable) {
+      leftParts.push(renderAnalysisUnavailablePanel(page));
     }
     if (sourceContext?.content) {
       const sections = sourceContextSections(sourceContext);
@@ -1787,6 +2004,8 @@ function renderCurrentPage() {
       rightParts.push(renderClassifiedRightPanel(fullClassified));
     } else if (isPending) {
       rightParts.push(renderClassifiedRightSkeleton());
+    } else if (analysisUnavailable) {
+      rightParts.push(renderAnalysisUnavailablePanel(page));
     }
     rightParts.push(drillResultPanel(activeDrill));
     right.innerHTML = rightParts.filter(Boolean).join('');
@@ -1827,6 +2046,9 @@ function bindClassifiedPanelActions(root, page) {
       renderCurrentPage();
     };
   });
+  root.querySelectorAll('[data-retry-intake]').forEach(btn => {
+    btn.onclick = () => retryImageIntake(btn.dataset.retryIntake || page.id);
+  });
 }
 
 // --- Generation ---
@@ -1856,10 +2078,11 @@ async function generateFirstPage(query) {
 async function generateChildPage(parentId, x, y, responseKind = 'image', intent = '') {
   clearError();
   setLoading(true);
+  const safeResponseKind = safePrimaryDrillKind(responseKind);
   try {
     const res = await fetch('/api/page', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parentId, parentClick: { x, y }, responseKind, intent, responseDepth: state.responseDepth, language: state.language }),
+      body: JSON.stringify({ parentId, parentClick: { x, y }, responseKind: safeResponseKind, intent, responseDepth: state.responseDepth, language: state.language }),
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
     const { page } = await res.json();
@@ -2003,7 +2226,8 @@ async function uploadImage(file) {
     renderCurrentPage();
     updateUI();
     clearError();
-    await generateUploadContext(page.id);
+    showStatus('Saved. Analyzing image in the background...');
+    setTimeout(clearStatus, 2500);
   } catch (err) { showError(err.message); }
   finally { setLoading(false); }
 }
@@ -2207,14 +2431,14 @@ async function openSettings() {
 
       <h3 class="settings-section-h">Drill in</h3>
       <div class="setting-group">
-        <label>Image drill (image &rarr; new image)</label>
-        <p class="desc">Used when the user drills with "Drill into image". Inherits parent's classified style descriptor when present.</p>
+        <label>Image generation/editing provider</label>
+        <p class="desc">Reserved for explicit image generation/editing features. Click-based Drill In sends the selected image region to the vision/text model and does not use image editing.</p>
         <select class="setting-select" id="editModelSelect">${optionsFor('editing')}</select>
         <p class="setting-current">Current: ${current.editing.provider}/${current.editing.model}</p>
       </div>
       <div class="setting-group">
-        <label>Text drill (markdown / chart / table / diagram)</label>
-        <p class="desc">Used when the user drills with one of the text formats. Distinct from Learn-panel analysis so you can tune them independently — e.g. a smarter model here for nuanced explanations, a faster one for Learn.</p>
+        <label>Drill In vision/text model (markdown / chart / table / diagram)</label>
+        <p class="desc">Used for click-based Drill In. The selected image region and the user's prompt are sent together, separate from Learn-panel analysis so you can tune them independently.</p>
         <select class="setting-select" id="drillTextModelSelect">${optionsFor('drillText')}</select>
         <p class="setting-current">Current: ${current.drillText.provider}/${current.drillText.model}</p>
       </div>
@@ -2527,6 +2751,10 @@ function showShortcutsToast() {
 }
 
 loadModes().then(restoreSession).finally(() => { renderCurrentPage(); updateUI(); });
+</script>
+<script type="module">
+  import { autoBind } from './anime/anime-helpers.js';
+  autoBind();
 </script>
 </body>
 </html>
