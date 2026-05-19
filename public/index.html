@@ -1244,6 +1244,42 @@ function renderVaultPanel(hits) {
   `;
 }
 
+function openHitDetail(hit) {
+  const dialog = $('vaultHitDialog');
+  if (!dialog) return;
+
+  $('vaultHitDialogTitle').textContent = hit.title || hit.path;
+
+  const fm = hit.frontMatter || {};
+  const metaParts = [
+    `<span><b>Path</b> ${escapeHtml(hit.path)}</span>`,
+    `<span><b>Score</b> ${Number(hit.score).toFixed(2)}</span>`,
+    ...Object.entries(fm).map(([k, v]) =>
+      `<span><b>${escapeHtml(k)}</b> ${escapeHtml(Array.isArray(v) ? v.join(', ') : String(v))}</span>`
+    ),
+  ];
+  $('vaultHitDialogMeta').innerHTML = metaParts.join('');
+
+  $('vaultHitDialogSnippet').textContent = hit.snippet || '(no snippet)';
+
+  $('vaultHitDialogCopy').onclick = () => {
+    navigator.clipboard.writeText(hit.path).then(() => {
+      const copied = $('vaultHitDialogCopied');
+      copied.style.display = 'inline';
+      setTimeout(() => { copied.style.display = 'none'; }, 2000);
+    });
+  };
+
+  dialog.showModal();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const dialog = $('vaultHitDialog');
+  if (!dialog) return;
+  $('vaultHitDialogClose').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+});
+
 function renderClassifiedLeftPanel(full) {
   if (!full || full.fallback_used) return '';
   const summary = full.visual_summary || '';
@@ -2090,6 +2126,15 @@ function renderCurrentPage() {
     }
     left.innerHTML = leftParts.filter(Boolean).join('');
 
+    // Wire vault hit click → detail dialog
+    left.querySelectorAll('[data-vault-hit]').forEach(el => {
+      el.addEventListener('click', () => {
+        const hits = vaultHitsCache.get(page.id) || [];
+        const idx = Number(el.dataset.vaultHit);
+        if (hits[idx]) openHitDetail(hits[idx]);
+      });
+    });
+
     const center = document.createElement('div');
     center.className = 'source-center';
     center.appendChild(container);
@@ -2906,5 +2951,18 @@ loadModes().then(restoreSession).finally(() => { renderCurrentPage(); updateUI()
   import { autoBind } from './anime/anime-helpers.js';
   autoBind();
 </script>
+<!-- Vault hit detail dialog -->
+<dialog id="vaultHitDialog" style="border:1px solid #ccc;border-radius:3px;padding:0;max-width:540px;width:95vw;box-shadow:0 8px 32px rgba(0,0,0,.18);">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:14px 16px 10px;border-bottom:1px solid #eee;">
+    <strong id="vaultHitDialogTitle" style="font-size:13px;line-height:1.35;max-width:90%;"></strong>
+    <button id="vaultHitDialogClose" style="border:none;background:none;cursor:pointer;font-size:16px;color:#888;padding:0 0 0 8px;line-height:1;" aria-label="Close">✕</button>
+  </div>
+  <div id="vaultHitDialogMeta" style="padding:10px 16px;border-bottom:1px solid #eee;font-size:11px;font-family:monospace;display:flex;flex-wrap:wrap;gap:10px;color:#555;"></div>
+  <div id="vaultHitDialogSnippet" style="padding:12px 16px;font-size:11px;font-family:monospace;white-space:pre-wrap;max-height:200px;overflow-y:auto;background:#faf8f5;color:#3a3632;border-bottom:1px solid #eee;"></div>
+  <div style="padding:10px 16px;">
+    <button id="vaultHitDialogCopy" class="btn" style="font-size:12px;">Copy Path</button>
+    <span id="vaultHitDialogCopied" style="font-size:11px;color:#4a7c59;margin-left:8px;display:none;">Copied ✓</span>
+  </div>
+</dialog>
 </body>
 </html>
