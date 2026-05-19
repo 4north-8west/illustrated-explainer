@@ -703,6 +703,14 @@ function buildVaultQuery(intent, classified) {
   return parts.join(' ').slice(0, 500);
 }
 
+function buildVaultContextBlock(hits) {
+  if (!hits?.length) return '';
+  const items = hits
+    .map((h, i) => `${i + 1}. ${h.title} — ${h.path}\n   ${h.snippet.replace(/\n/g, '\n   ')}`)
+    .join('\n\n');
+  return `[VAULT CONTEXT — UC Merced Accessibility Program]\nThe following excerpts from the program vault are relevant to this question:\n\n${items}\n\nUse this context to ground your response where relevant.\n\n---\n\n`;
+}
+
 // Load the cached classified payload for a page, or null if not yet classified
 // (or page is not an image). Phase A.2 uses this to thread parent context into
 // the drill child generation prompts.
@@ -761,7 +769,7 @@ ${uploadContext.content.slice(0, maxChars)}
 Use this source context as primary evidence for uploaded images, especially visible text, labels, equations, axis names, legends, and table/chart structure. If the focused crop is ambiguous, prefer values and labels supported by this context and explicitly mark uncertainty.`;
 }
 
-async function generateTextDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '', parentClassified = null) {
+async function generateTextDrillPage(compositedImageBuffer, mode, intent, contextTrail, responseDepth = 'explain', language = '', parentClassified = null, vaultContext = '') {
   const imageBase64 = compositedImageBuffer.toString('base64');
   const modeLabel = MODES[mode]?.modeLabelForPrompt || mode.replace(/_/g, ' ');
   const uploadContext = contextTrail.length ? findNearestUploadContext(contextTrail[contextTrail.length - 1].id) : null;
@@ -775,7 +783,7 @@ async function generateTextDrillPage(compositedImageBuffer, mode, intent, contex
   const parentCtxBlock = parentCtx ? `\n\n${parentCtx}` : '';
 
   const systemPrompt = `You are an expert STEM-capable educator. Explain only the exact selected region in an image, not the image as a whole. Prefer precise text, equations, tables, or concise examples over generating another image. Use Markdown. If math is needed, use valid LaTeX with inline math in $...$ and display math in $$...$$.`;
-  const userPrompt = `The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
+  const userPrompt = `${vaultContext ? vaultContext + '\n' : ''}The image has two panels. The left panel shows the full page with the click marked. The right panel is a zoomed crop centered on the clicked location and labeled "ZOOMED CLICK REGION - ANSWER ABOUT THIS".
 
 Focus your answer on the feature at the center of the right zoomed panel. Use the full left panel only for context.
 
@@ -1658,7 +1666,7 @@ app.post('/api/page', async (req, res) => {
       mode = parentMeta?.mode || 'illustration';
     }
 
-    const page = await enqueueGeneration(async () => {
+    const genResult = await enqueueGeneration(async () => {
       let id, parentPageId = null, parentClickData = null, initialQuery = null;
       let folder;
 
@@ -1710,9 +1718,19 @@ app.post('/api/page', async (req, res) => {
           const textPath = pageJsonPath(folder, id);
           if (fs.existsSync(textPath)) {
             const cached = loadPageContent(folder, id);
-            if (cached) return cached;
+            if (cached) return { page: cached, vaultHits: [] };
           }
-          const result = await generateTextDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language, parentClassified);
+          let vaultHits = [];
+          let vaultContext = '';
+          if (vaultMode) {
+            const vaultQuery = buildVaultQuery(intent, parentClassified);
+            if (vaultQuery.trim()) {
+              const vaultResult = await searchVault(vaultQuery, { filters: vaultFilters });
+              vaultHits = vaultResult.hits;
+              vaultContext = buildVaultContextBlock(vaultHits);
+            }
+          }
+          const result = await generateTextDrillPage(focusedComposite, mode, intent, contextTrail, responseDepth, language, parentClassified, vaultContext);
           const page = {
             id,
             type: 'markdown',
@@ -1731,7 +1749,7 @@ app.post('/api/page', async (req, res) => {
           pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'markdown', parentId, parentClick: parentClickData, intent, responseDepth, language };
           saveMetadata(pageMeta);
           console.log(`Saved: ${textPath}`);
-          return page;
+          return { page, vaultHits };
         }
         if (responseKind === 'chart') {
           const chartPath = pageJsonPath(folder, id);
@@ -1851,7 +1869,8 @@ app.post('/api/page', async (req, res) => {
       return { id, type: 'image', imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode, analysisStatus: analysisStatus(id) };
     });
 
-    res.json({ page });
+    const { page: genPage, vaultHits: genVaultHits } = genResult?.page ? genResult : { page: genResult, vaultHits: [] };
+    res.json({ page: genPage, vaultHits: genVaultHits ?? [] });
   } catch (err) {
     console.error('Generation error:', err.message);
     const message = err.message?.includes('Keep it local is enabled') || err.message?.includes('No local image')
