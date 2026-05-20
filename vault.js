@@ -1,18 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 const execFileAsync = promisify(execFile);
 
-const VAULT_ROOT = path.join(os.homedir(), 'Documents', 'Obsidian Vaults', 'Merced A11Y');
 const QMD_PREFIX = 'qmd://merced-a11y/';
-
-function resolveVaultPath(fileUrl) {
-  if (!fileUrl?.startsWith(QMD_PREFIX)) return null;
-  return path.join(VAULT_ROOT, fileUrl.slice(QMD_PREFIX.length));
-}
 
 function parseFrontMatter(content) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -30,14 +21,6 @@ function parseFrontMatter(content) {
     }
   }
   return result;
-}
-
-function readVaultFile(vaultAbsPath) {
-  try {
-    return fs.readFileSync(vaultAbsPath, 'utf8');
-  } catch {
-    return null;
-  }
 }
 
 function fieldMatches(frontMatter, field, value) {
@@ -61,7 +44,7 @@ function applyFilters(hits, filters) {
 export async function searchVault(query, opts = {}) {
   const { n = 5, minScore = 0.4, collection = 'merced-a11y', filters } = opts;
   try {
-    const { stdout } = await execFileAsync('qmd', ['query', query, '--json', '-n', String(n), '-c', collection], {
+    const { stdout } = await execFileAsync('qmd', ['query', query, '--json', '--full', '-n', String(n), '-c', collection], {
       timeout: 15000,
     });
     const raw = JSON.parse(stdout);
@@ -69,9 +52,7 @@ export async function searchVault(query, opts = {}) {
       .filter(h => (h.score ?? 0) >= minScore)
       .map(h => {
         const relPath = h.file?.startsWith(QMD_PREFIX) ? h.file.slice(QMD_PREFIX.length) : (h.file || '');
-        const absPath = resolveVaultPath(h.file);
-        const content = absPath ? readVaultFile(absPath) : null;
-        const frontMatter = content ? parseFrontMatter(content) : {};
+        const frontMatter = h.body ? parseFrontMatter(h.body) : {};
         return {
           title: h.title || relPath,
           file: h.file || '',
