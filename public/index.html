@@ -182,7 +182,7 @@
   .drill-text-trigger { background: #6b5a3e; color: #fff; border-color: #6b5a3e; padding: 8px 14px; font-weight: 600; }
   .drill-text-trigger:hover { background: #58492f; border-color: #58492f; color: #fff; }
   .drill-text-trigger::after { content: " ▾"; opacity: 0.85; font-size: 11px; }
-  .drill-text-menu { position: absolute; bottom: calc(100% + 6px); right: 0; min-width: 240px; background: #fff; border: 1px solid #d6cfc7; border-radius: 8px; box-shadow: 0 6px 22px rgba(0,0,0,0.14); padding: 5px; z-index: 7; display: none; }
+  .drill-text-menu { position: fixed; min-width: 240px; background: #fff; border: 1px solid #d6cfc7; border-radius: 8px; box-shadow: 0 6px 22px rgba(0,0,0,0.14); padding: 5px; z-index: 9999; display: none; }
   .drill-text-wrap.open .drill-text-menu { display: block; }
   .drill-text-menu button { display: block; width: 100%; text-align: left; padding: 9px 11px; background: transparent; border: none; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 13px; color: #444; }
   .drill-text-menu button:hover { background: #faf3e3; }
@@ -517,6 +517,7 @@ const sourceContextRequests = {}; // pageId -> Promise
 const sourceContextState = new Map(); // pageId -> pending | unavailable
 const inlineAnalysisRequests = {}; // pageId -> Promise
 const vaultHitsCache = new Map(); // pageId -> hits[]
+const vaultSearchInFlight = new Set(); // pageIds with active vault search
 
 function renderVaultFilterChips() {
   function renderChips(containerId, rules, kind) {
@@ -2027,7 +2028,13 @@ function renderCurrentPage() {
     textTrigger.title = 'Analyze this image region in a different output format';
     textTrigger.onclick = (ev) => {
       ev.stopPropagation();
+      const wasOpen = textWrap.classList.contains('open');
       textWrap.classList.toggle('open');
+      if (!wasOpen) {
+        const rect = textTrigger.getBoundingClientRect();
+        textMenu.style.right = (window.innerWidth - rect.right) + 'px';
+        textMenu.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+      }
     };
     const textMenu = document.createElement('div');
     textMenu.className = 'drill-text-menu';
@@ -2124,10 +2131,23 @@ function renderCurrentPage() {
       if (!haveTranscript) leftParts.push(sourceAccordion('Extracted Text', sections.extracted));
       leftParts.push(sourceAccordion('Structure', sections.structure));
     }
-    // Vault Sources panel — only for drill result pages with cached hits
+    // Vault Sources panel
     const currentVaultHits = vaultHitsCache.get(page.id);
-    if (state.vaultMode && currentVaultHits?.length) {
-      leftParts.push(renderVaultPanel(currentVaultHits));
+    if (state.vaultMode && page.type === 'markdown' && page.intent) {
+      if (currentVaultHits?.length) {
+        leftParts.push(renderVaultPanel(currentVaultHits));
+      } else if (!vaultHitsCache.has(page.id) && !vaultSearchInFlight.has(page.id)) {
+        // Lazy search for cached drill pages that pre-date vault mode
+        vaultSearchInFlight.add(page.id);
+        fetch('/api/vault-search', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parentId: page.parentId, intent: page.intent, vaultFilters: state.vaultFilters }),
+        }).then(r => r.json()).then(({ hits }) => {
+          vaultSearchInFlight.delete(page.id);
+          if (hits?.length) { vaultHitsCache.set(page.id, hits); renderCurrentPage(); }
+          else vaultHitsCache.set(page.id, []); // mark searched, no results
+        }).catch(() => vaultSearchInFlight.delete(page.id));
+      }
     }
     left.innerHTML = leftParts.filter(Boolean).join('');
 

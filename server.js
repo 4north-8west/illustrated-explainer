@@ -1621,6 +1621,17 @@ app.get('/api/page/:pageId/children', (req, res) => {
   res.json({ children: descendants });
 });
 
+app.post('/api/vault-search', async (req, res) => {
+  const { parentId, intent, vaultFilters: reqVaultFilters } = req.body;
+  if (!intent?.trim()) return res.json({ hits: [] });
+  const filters = (reqVaultFilters && typeof reqVaultFilters === 'object') ? reqVaultFilters : { include: [], exclude: [] };
+  const parentClassified = parentId ? loadParentClassified(parentId) : null;
+  const query = buildVaultQuery(intent, parentClassified).trim();
+  if (!query) return res.json({ hits: [] });
+  const result = await searchVault(query, { filters });
+  res.json({ hits: result.hits });
+});
+
 app.post('/api/page', async (req, res) => {
   const { query, parentId, parentClick, mode: reqMode, intent: reqIntent, responseKind: reqResponseKind, responseDepth: reqResponseDepth, language: reqLanguage, vaultMode: reqVaultMode, vaultFilters: reqVaultFilters } = req.body;
   const vaultMode = reqVaultMode === true;
