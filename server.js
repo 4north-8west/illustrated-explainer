@@ -1062,6 +1062,7 @@ Rules:
   const cfg = modelConfig.drillText;  // drill chart
   let result;
   let usedFallback = false;
+  let fallbackProvider = null;
   try {
     result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
   } catch (err) {
@@ -1071,6 +1072,7 @@ Rules:
         const [fbProvider, fbModel] = fb;
         result = await callVisionChat(fbProvider, fbModel, imageBase64, systemPrompt, userPrompt);
         usedFallback = true;
+        fallbackProvider = fbProvider;
       } else { throw err; }
     } else { throw err; }
   }
@@ -1096,7 +1098,9 @@ Return corrected JSON only. If the selected region cannot support a trustworthy 
 
   chart.validationIssues = validation.issues;
   chart.isReliable = validation.issues.length === 0 && chart.chartability !== 'low';
-  const source = usedFallback ? `${retryProvider} (fallback)` : (cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`);
+  const source = usedFallback
+    ? `${fallbackProvider ?? retryProvider} (fallback)`
+    : (cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`);
   return { chart, source };
 }
 
@@ -2112,7 +2116,7 @@ async function analyzeImageForClassify(systemPrompt, userPrompt, imageBase64) {
     return { text, source: sourceName };
   } catch (err) {
     if (cfg.provider === 'local' && isLocalOutage(err)) {
-      if (OLLAMA_API_KEY) {
+      if (!modelConfig.localOnly && OLLAMA_API_KEY) {
         console.log(`[classify] Local outage → ollama/${OLLAMA_FALLBACK_MODEL}`);
         const text = await callVisionChat('ollama', OLLAMA_FALLBACK_MODEL, imageBase64, systemPrompt, userPrompt);
         return { text, source: 'ollama (fallback)' };
