@@ -1776,7 +1776,7 @@ app.post('/api/page', async (req, res) => {
           const textPath = pageJsonPath(folder, id);
           if (fs.existsSync(textPath)) {
             const cached = loadPageContent(folder, id);
-            if (cached) return { page: cached, vaultHits: [] };
+            if (cached) return { page: cached, vaultHits: [], vaultError: null };
           }
           let vaultHits = [];
           let vaultContext = '';
