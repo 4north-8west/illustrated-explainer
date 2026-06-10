@@ -336,6 +336,7 @@
   .learn-body .analyze-btn { display: block; margin: 20px auto 0; padding: 10px 28px; background: #5a7d6a; color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
   .learn-body .analyze-btn:hover { background: #4a6a58; }
   .learn-body .analyze-btn:disabled { opacity: 0.5; cursor: default; }
+  .learn-body .learn-error-msg { background: #fdf0ef; border: 1px solid #e8b4b0; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #8b3a33; line-height: 1.5; margin: 12px 0 8px; }
   .learn-body .analyze-btn.secondary { background: transparent; color: #6b5a3e; border: 1px solid #d6c8a8; padding: 8px 18px; font-size: 13px; margin-top: 10px; }
   .learn-body .analyze-btn.secondary:hover { background: #faf3e3; border-color: #b8a06f; color: #4f463b; }
   /* Learn footer toolbar (rendered when content exists) */
@@ -1718,6 +1719,10 @@ const EMPTY_STATE_HTML = `
 `;
 
 function renderCurrentPage() {
+  // Clear stale learn-panel error when navigating away while panel is closed
+  if (!$('learnPanel').classList.contains('visible')) {
+    learnAnalysisError = null;
+  }
   const page = state.pages[state.currentIndex];
   const canvas = $('canvasArea');
   if (!page) {
@@ -2677,6 +2682,8 @@ async function openSettings() {
 let learnCache = {}; // pageId -> { description, explanation }
 let learnActiveTab = 'description';
 let learnAnalyzing = false;
+let learnAnalysisError = null; // string | null — persistent error shown inside panel body
+let learnPollTimer = null;     // setTimeout handle for active polling
 
 function simpleMarkdown(text) {
   if (!text) return '';
@@ -2760,16 +2767,23 @@ function renderLearnTab() {
 
   // Not yet analyzed — primary action is "Analyze both" (faster than two round-trips)
   const label = learnActiveTab === 'description' ? 'description' : 'concept explanation';
-  body.innerHTML = `<div class="empty-msg">No analysis yet for this page.<br>Uses your local Gemma model if vision is available, otherwise falls back to Grok API.</div>` +
+  const errorBlock = learnAnalysisError
+    ? `<div class="learn-error-msg">${escapeHtml(learnAnalysisError)}</div>`
+    : '';
+  const helpText = learnAnalysisError
+    ? ''
+    : `<div class="empty-msg">No analysis yet for this page.<br>Uses local Gemma (port 8080), Ollama Cloud, or Grok as fallback.</div>`;
+  body.innerHTML = helpText + errorBlock +
     `<button class="analyze-btn" id="analyzeBothBtn">Analyze description &amp; concepts</button>` +
     `<button class="analyze-btn secondary" id="analyzeBtn">Just analyze ${escapeHtml(label)}</button>`;
 
-  $('analyzeBothBtn').onclick = () => runAnalysis(page.id, 'both');
-  $('analyzeBtn').onclick = () => runAnalysis(page.id, learnActiveTab);
+  $('analyzeBothBtn').onclick = () => { learnAnalysisError = null; runAnalysis(page.id, 'both'); };
+  $('analyzeBtn').onclick    = () => { learnAnalysisError = null; runAnalysis(page.id, learnActiveTab); };
 }
 
 async function runAnalysis(pageId, type) {
   learnAnalyzing = true;
+  learnAnalysisError = null;
   renderLearnTab();
 
   try {
@@ -2779,21 +2793,92 @@ async function runAnalysis(pageId, type) {
       body: JSON.stringify({ type }),
     });
     const data = await res.json();
-    if (data.error && !data.description && !data.explanation) {
-      showError(data.error);
+    if (!res.ok) {
+      learnAnalysisError = data.error || `Server error ${res.status}`;
+      learnAnalyzing = false;
+      renderLearnTab();
+      return;
     }
     learnCache[pageId] = data;
+    if (data.analyzing) {
+      renderLearnTab(); // keep spinner, start poll
+      pollLearnStatus(pageId);
+    } else {
+      learnAnalyzing = false;
+      renderLearnTab();
+    }
   } catch (err) {
-    showError('Analysis failed: ' + err.message);
-  } finally {
+    learnAnalysisError = 'Could not reach the server: ' + err.message;
     learnAnalyzing = false;
     renderLearnTab();
   }
 }
 
+function pollLearnStatus(pageId) {
+  if (learnPollTimer) clearTimeout(learnPollTimer);
+  const MAX_POLLS = 36; // 36 × 5s = 3 minutes
+  let polls = 0;
+
+  async function poll() {
+    if (!$('learnPanel').classList.contains('visible')) return; // panel closed, stop
+
+    polls++;
+    try {
+      const statusRes = await fetch(`/api/intake/${pageId}`);
+      if (!statusRes.ok) throw new Error(`status ${statusRes.status}`);
+      const { analysisStatus } = await statusRes.json();
+
+      const stillWorking =
+        analysisStatus.inFlight?.classify ||
+        analysisStatus.inFlight?.intake   ||
+        analysisStatus.inFlight?.synthesis;
+      const hasData = analysisStatus.description || analysisStatus.explanation;
+
+      if (hasData) {
+        const freshRes = await fetch(`/api/analysis/${pageId}`);
+        learnCache[pageId] = await freshRes.json();
+        learnAnalyzing = false;
+        learnAnalysisError = null;
+        renderLearnTab();
+        return;
+      }
+
+      if (!stillWorking) {
+        learnAnalyzing = false;
+        learnAnalysisError =
+          'Analysis could not be completed. Check that llama-server is running on port 8080, ' +
+          'or set OLLAMA_API_KEY / XAI_API_KEY for a cloud fallback.';
+        renderLearnTab();
+        return;
+      }
+
+      if (polls >= MAX_POLLS) {
+        learnAnalyzing = false;
+        learnAnalysisError =
+          'Analysis timed out after 3 minutes. The model server may be overloaded — try again.';
+        renderLearnTab();
+        return;
+      }
+
+      learnPollTimer = setTimeout(poll, 5000);
+    } catch (err) {
+      learnAnalysisError = 'Lost connection to server while waiting for analysis.';
+      learnAnalyzing = false;
+      renderLearnTab();
+    }
+  }
+
+  learnPollTimer = setTimeout(poll, 5000);
+}
+
 function closePanel(name) {
   $(name + 'Overlay').classList.remove('visible');
   $(name + 'Panel').classList.remove('visible');
+  if (name === 'learn') {
+    if (learnPollTimer) { clearTimeout(learnPollTimer); learnPollTimer = null; }
+    learnAnalyzing = false;
+    learnAnalysisError = null;
+  }
 }
 
 
