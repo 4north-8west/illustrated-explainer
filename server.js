@@ -2704,47 +2704,52 @@ app.post('/api/intake/:pageId', (req, res) => {
   res.json({ analysisStatus: analysisStatus(pageId), queued: true });
 });
 
-app.post('/api/analysis/:pageId', async (req, res) => {
-  const { pageId } = req.params;
-  const { type } = req.body; // 'description', 'explanation', or 'both'
+app.post('/api/analysis/:pageId', (req, res) => {
+  try {
+    const { pageId } = req.params;
+    const { type } = req.body; // 'description', 'explanation', or 'both'
 
-  if (!(/^[a-f0-9]{16}$/.test(pageId))) {
-    return res.status(400).json({ error: 'Invalid page ID' });
-  }
+    if (!(/^[a-f0-9]{16}$/.test(pageId))) {
+      return res.status(400).json({ error: 'Invalid page ID' });
+    }
 
-  const meta = pageMeta[pageId];
-  if (!meta) return res.status(404).json({ error: 'Page not found in metadata' });
+    const meta = pageMeta[pageId];
+    if (!meta) return res.status(404).json({ error: 'Page not found in metadata' });
 
-  const imagePath = path.join(GENERATED_DIR, meta.folder, `${pageId}.png`);
-  if (!fs.existsSync(imagePath)) {
-    return res.status(404).json({ error: 'Image file not found' });
-  }
+    const imagePath = path.join(GENERATED_DIR, meta.folder, `${pageId}.png`);
+    if (!fs.existsSync(imagePath)) {
+      return res.status(404).json({ error: 'Image file not found' });
+    }
 
-  // v2 pipeline: fire-and-forget — do not block the HTTP response.
-  // The client reads `analyzing: true` and polls GET /api/intake/:pageId.
-  const existing = loadAnalysis(pageId) || {};
-  const wantDescription = type === 'description' || type === 'both';
-  const wantExplanation = type === 'explanation' || type === 'both';
-  let analyzing = false;
+    // v2 pipeline: fire-and-forget — do not block the HTTP response.
+    // The client reads `analyzing: true` and polls GET /api/intake/:pageId.
+    const existing = loadAnalysis(pageId) || {};
+    const wantDescription = type === 'description' || type === 'both';
+    const wantExplanation = type === 'explanation' || type === 'both';
+    let analyzing = false;
 
-  if (wantDescription && !existing.description) {
-    enqueueImageIntake(pageId);   // fire-and-forget
-    analyzing = true;
-  }
-
-  if (wantExplanation && !existing.explanation) {
-    if (!existing.classified) {
-      // Intake runs classify first, synthesis queues automatically downstream
-      enqueueImageIntake(pageId); // fire-and-forget (idempotent — deduped if already running)
-      analyzing = true;
-    } else {
-      // C2 fix: attempt synthesis regardless of fallback_used on explicit user trigger
-      enqueueSynthesis(pageId);   // fire-and-forget
+    if (wantDescription && !existing.description) {
+      enqueueImageIntake(pageId);   // fire-and-forget
       analyzing = true;
     }
-  }
 
-  res.json({ ...existing, analyzing });
+    if (wantExplanation && !existing.explanation) {
+      if (!existing.classified) {
+        // Intake runs classify first, synthesis queues automatically downstream
+        enqueueImageIntake(pageId); // fire-and-forget (idempotent — deduped if already running)
+        analyzing = true;
+      } else {
+        // C2 fix: attempt synthesis regardless of fallback_used on explicit user trigger
+        enqueueSynthesis(pageId);   // fire-and-forget
+        analyzing = true;
+      }
+    }
+
+    res.json({ ...existing, analyzing });
+  } catch (err) {
+    console.error('[analysis] POST handler error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // --- Gallery API ---
