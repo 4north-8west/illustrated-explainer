@@ -68,8 +68,14 @@ const DEFAULT_MODEL_CONFIG = {
 };
 
 function loadModelConfig() {
-  try { return { ...DEFAULT_MODEL_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) }; }
-  catch { return { ...DEFAULT_MODEL_CONFIG }; }
+  try {
+    const disk = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    return {
+      ...DEFAULT_MODEL_CONFIG,
+      ...disk,
+      localPorts: { ...DEFAULT_MODEL_CONFIG.localPorts, ...(disk.localPorts ?? {}) },
+    };
+  } catch { return { ...DEFAULT_MODEL_CONFIG }; }
 }
 
 function saveModelConfig(config) {
@@ -1281,7 +1287,7 @@ app.post('/api/models', (req, res) => {
   if (localPorts && typeof localPorts === 'object') {
     const small = parseInt(localPorts.small, 10);
     const large = parseInt(localPorts.large, 10);
-    const current = modelConfig.localPorts ?? { small: 8080, large: 8082 };
+    const current = { ...DEFAULT_MODEL_CONFIG.localPorts, ...(modelConfig.localPorts ?? {}) };
     if (Number.isInteger(small) && small > 0 && small < 65536) current.small = small;
     if (Number.isInteger(large) && large > 0 && large < 65536) current.large = large;
     modelConfig.localPorts = current;
