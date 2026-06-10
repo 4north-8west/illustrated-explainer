@@ -78,12 +78,15 @@
   .source-side { display: grid; gap: 12px; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
   .source-left { align-content: start; grid-auto-rows: max-content; overflow: auto; padding-right: 2px; }
   .source-center { display: flex; align-items: flex-start; justify-content: center; min-width: 0; min-height: 0; overflow: hidden; }
-  .source-right { grid-template-rows: minmax(0, 1fr); }
+  .source-right { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: hidden; }
   .source-panel { background: #fff; border: 1px solid #e8e4df; border-radius: 8px; box-shadow: 0 1px 8px rgba(0,0,0,0.04); padding: 12px 14px; min-height: 0; overflow: auto; }
   .source-panel.tall { height: 100%; }
   .source-panel.split { max-height: none; }
   .source-left .source-panel, .source-right .source-panel { min-height: 0; max-height: none; }
   .source-panel h2 { font-size: 14px; color: #4f463b; margin: 0 0 8px; border-bottom: 1px solid #ece6de; padding-bottom: 5px; }
+  /* Right-column panel flex sizing: classified panel short+scrollable, drill result fills rest */
+  .source-right .source-panel:not(.drill-result) { flex: 0 0 auto; max-height: 260px; overflow-y: auto; }
+  .source-right .source-panel.drill-result { flex: 1 1 0; min-height: 120px; overflow-y: auto; }
   /* Phase B classified panels */
   .source-panel .panel-meta { font-size: 11px; font-weight: 400; color: #999; float: right; }
   .source-panel.cat-card { background: #fffdf9; }
@@ -1648,7 +1651,11 @@ function drillResultPanel(selection) {
   else body = '<p>No renderable drill-in content.</p>';
 
   return `<section class="source-panel drill-result">
-    <h2>${escapeHtml(title)}</h2>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:4px;">
+      <h2 style="margin:0;flex:1;min-width:0;">${escapeHtml(title)}</h2>
+      <button type="button" data-clear-drill="1" title="Dismiss drill result"
+        style="flex:0 0 auto;background:transparent;border:none;font-size:18px;cursor:pointer;color:#aaa;line-height:1;padding:0;">&times;</button>
+    </div>
     <div class="drill-result-meta">${escapeHtml(meta)}</div>
     <div class="source-content">${body}</div>
   </section>`;
@@ -2220,6 +2227,13 @@ function bindClassifiedPanelActions(root, page) {
   });
   root.querySelectorAll('[data-retry-intake]').forEach(btn => {
     btn.onclick = () => retryImageIntake(btn.dataset.retryIntake || page.id);
+  });
+  root.querySelectorAll('[data-clear-drill]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      delete state.activeDrillByParent[page.id];
+      saveSession();
+      renderCurrentPage();
+    });
   });
 }
 
