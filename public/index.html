@@ -2684,6 +2684,7 @@ let learnActiveTab = 'description';
 let learnAnalyzing = false;
 let learnAnalysisError = null; // string | null — persistent error shown inside panel body
 let learnPollTimer = null;     // setTimeout handle for active polling
+let pollGeneration = 0;
 
 function simpleMarkdown(text) {
   if (!text) return '';
@@ -2816,10 +2817,12 @@ async function runAnalysis(pageId, type) {
 
 function pollLearnStatus(pageId) {
   if (learnPollTimer) clearTimeout(learnPollTimer);
+  const myGen = ++pollGeneration; // capture; stale polls check this on resume
   const MAX_POLLS = 36; // 36 × 5s = 3 minutes
   let polls = 0;
 
   async function poll() {
+    if (myGen !== pollGeneration) return; // superseded by newer poll session
     if (!$('learnPanel').classList.contains('visible')) return; // panel closed, stop
 
     polls++;
@@ -2875,6 +2878,7 @@ function closePanel(name) {
   $(name + 'Overlay').classList.remove('visible');
   $(name + 'Panel').classList.remove('visible');
   if (name === 'learn') {
+    pollGeneration++;  // invalidate any in-flight poll async continuations
     if (learnPollTimer) { clearTimeout(learnPollTimer); learnPollTimer = null; }
     learnAnalyzing = false;
     learnAnalysisError = null;
