@@ -15,6 +15,8 @@ const PORT = process.env.PORT || 3000;
 const XAI_API_KEY = process.env.XAI_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
+const OLLAMA_FALLBACK_MODEL = 'gemma4:31b-cloud';
 const CACHE_VERSION = 'v1';
 const GENERATED_DIR = path.join(__dirname, 'generated');
 const CONFIG_PATH = path.join(__dirname, 'model-config.json');
@@ -136,6 +138,17 @@ const MODEL_REGISTRY = {
     chatUrl: LLAMA_SERVER_URL + '/v1/chat/completions',
     authHeader: () => null,
   },
+  ollama: {
+    name: 'Ollama Cloud',
+    models: {
+      [OLLAMA_FALLBACK_MODEL]: {
+        name: 'Gemma 4 31B Cloud',
+        capabilities: ['analysis', 'classify', 'drillText'],
+      },
+    },
+    chatUrl: 'https://api.ollama.com/v1/chat/completions',
+    authHeader: () => (OLLAMA_API_KEY ? `Bearer ${OLLAMA_API_KEY}` : null),
+  },
 };
 
 // Resolve the chat endpoint for a given provider/model — uses the model-level
@@ -147,6 +160,22 @@ function resolveChatUrl(provider, model) {
   if (!providerConfig) return null;
   const modelConfigEntry = providerConfig.models?.[model];
   return modelConfigEntry?.chatUrl || providerConfig.chatUrl || null;
+}
+
+function isLocalOutage(err) {
+  return (
+    err.message === 'VISION_NOT_SUPPORTED' ||
+    err.message.includes('ECONNREFUSED') ||
+    err.message.includes('not reachable')
+  );
+}
+
+// Returns ['ollama', OLLAMA_FALLBACK_MODEL] if OLLAMA_API_KEY is set,
+// ['xai', 'grok-4-1-fast-non-reasoning'] if XAI_API_KEY is set, null otherwise.
+function cloudFallback() {
+  if (OLLAMA_API_KEY) return ['ollama', OLLAMA_FALLBACK_MODEL];
+  if (XAI_API_KEY)    return ['xai', 'grok-4-1-fast-non-reasoning'];
+  return null;
 }
 
 app.use(express.json({ limit: '50mb' }));
@@ -810,9 +839,13 @@ Respond with a focused Markdown learning page:
     const text = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
     return { text, source: cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})` };
   } catch (err) {
-    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
-      const text = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
-      return { text, source: 'grok (fallback)' };
+    if (cfg.provider === 'local' && isLocalOutage(err)) {
+      const fb = cloudFallback();
+      if (!modelConfig.localOnly && fb) {
+        const [fbProvider, fbModel] = fb;
+        const text = await callVisionChat(fbProvider, fbModel, imageBase64, systemPrompt, userPrompt);
+        return { text, source: `${fbProvider} (fallback)` };
+      }
     }
     throw err;
   }
@@ -1032,12 +1065,14 @@ Rules:
   try {
     result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
   } catch (err) {
-    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
-      result = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
-      usedFallback = true;
-    } else {
-      throw err;
-    }
+    if (cfg.provider === 'local' && isLocalOutage(err)) {
+      const fb = cloudFallback();
+      if (!modelConfig.localOnly && fb) {
+        const [fbProvider, fbModel] = fb;
+        result = await callVisionChat(fbProvider, fbModel, imageBase64, systemPrompt, userPrompt);
+        usedFallback = true;
+      } else { throw err; }
+    } else { throw err; }
   }
 
   let chart = normalizeChartSpec(parseJsonResponse(result));
@@ -1052,20 +1087,18 @@ Previous JSON:
 ${JSON.stringify(chart, null, 2)}
 
 Return corrected JSON only. If the selected region cannot support a trustworthy chart, set chartability to "low", set fallbackRecommendation to the best non-chart format, leave points empty, and explain why in uncertainty.`;
-    const retryResult = await callVisionChat(
-      usedFallback ? 'xai' : cfg.provider,
-      usedFallback ? 'grok-4-1-fast-non-reasoning' : cfg.model,
-      imageBase64,
-      systemPrompt,
-      retryPrompt
-    );
+    const [retryProvider, retryModel] = usedFallback
+      ? (cloudFallback() ?? ['xai', 'grok-4-1-fast-non-reasoning'])
+      : [cfg.provider, cfg.model];
+    const retryResult = await callVisionChat(retryProvider, retryModel, imageBase64, systemPrompt, retryPrompt);
     chart = normalizeChartSpec(parseJsonResponse(retryResult));
     validation = validateChartSpec(chart);
   }
 
   chart.validationIssues = validation.issues;
   chart.isReliable = validation.issues.length === 0 && chart.chartability !== 'low';
-  const source = usedFallback ? 'grok (fallback)' : (cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`);
+  const [fbProv] = cloudFallback() ?? ['xai'];
+  const source = usedFallback ? `${fbProv} (fallback)` : (cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`);
   return { chart, source };
 }
 
@@ -1118,10 +1151,14 @@ Rules:
   try {
     result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
   } catch (err) {
-    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
-      result = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
-      const table = normalizeTableSpec(parseJsonResponse(result));
-      return { table, source: 'grok (fallback)' };
+    if (cfg.provider === 'local' && isLocalOutage(err)) {
+      const fb = cloudFallback();
+      if (!modelConfig.localOnly && fb) {
+        const [fbProvider, fbModel] = fb;
+        result = await callVisionChat(fbProvider, fbModel, imageBase64, systemPrompt, userPrompt);
+        const table = normalizeTableSpec(parseJsonResponse(result));
+        return { table, source: `${fbProvider} (fallback)` };
+      }
     }
     throw err;
   }
@@ -1182,10 +1219,14 @@ Rules:
   try {
     result = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
   } catch (err) {
-    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
-      result = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
-      const diagram = normalizeDiagramSpec(parseJsonResponse(result));
-      return { diagram, source: 'grok (fallback)' };
+    if (cfg.provider === 'local' && isLocalOutage(err)) {
+      const fb = cloudFallback();
+      if (!modelConfig.localOnly && fb) {
+        const [fbProvider, fbModel] = fb;
+        result = await callVisionChat(fbProvider, fbModel, imageBase64, systemPrompt, userPrompt);
+        const diagram = normalizeDiagramSpec(parseJsonResponse(result));
+        return { diagram, source: `${fbProvider} (fallback)` };
+      }
     }
     throw err;
   }
@@ -1489,9 +1530,13 @@ async function translatePageContent(page, language) {
     const text = await callTextChat(cfg.provider, cfg.model, systemPrompt, userPrompt);
     return { text, source: sourceName };
   } catch (err) {
-    if (!modelConfig.localOnly && cfg.provider === 'local' && err.message.includes('ECONNREFUSED')) {
-      const text = await callTextChat('xai', 'grok-4-1-fast-non-reasoning', systemPrompt, userPrompt);
-      return { text, source: 'grok (fallback)' };
+    if (cfg.provider === 'local' && isLocalOutage(err)) {
+      const fb = cloudFallback();
+      if (!modelConfig.localOnly && fb) {
+        const [fbProvider, fbModel] = fb;
+        const text = await callTextChat(fbProvider, fbModel, systemPrompt, userPrompt);
+        return { text, source: `${fbProvider} (fallback)` };
+      }
     }
     throw err;
   }
@@ -2043,11 +2088,14 @@ async function analyzeImage(imageBase64, systemPrompt, userPrompt) {
     const text = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
     return { text, source: sourceName };
   } catch (err) {
-    if (!modelConfig.localOnly && cfg.provider === 'local' && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'))) {
-      // Fallback to Grok
-      console.log(`[analysis] Local model unavailable (${err.message}), falling back to Grok...`);
-      const text = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
-      return { text, source: 'grok (fallback)' };
+    if (cfg.provider === 'local' && isLocalOutage(err)) {
+      const fb = cloudFallback();
+      if (!modelConfig.localOnly && fb) {
+        const [fbProvider, fbModel] = fb;
+        console.log(`[analysis] Local outage → ${fbProvider}/${fbModel}`);
+        const text = await callVisionChat(fbProvider, fbModel, imageBase64, systemPrompt, userPrompt);
+        return { text, source: `${fbProvider} (fallback)` };
+      }
     }
     throw err;
   }
@@ -2065,12 +2113,17 @@ async function analyzeImageForClassify(systemPrompt, userPrompt, imageBase64) {
     const text = await callVisionChat(cfg.provider, cfg.model, imageBase64, systemPrompt, userPrompt);
     return { text, source: sourceName };
   } catch (err) {
-    const isLocalOutage = cfg.provider === 'local'
-      && (err.message === 'VISION_NOT_SUPPORTED' || err.message.includes('ECONNREFUSED'));
-    if (isLocalOutage && modelConfig.allowClassifyCloudFallback === true) {
-      console.log(`[classify] Local model unavailable (${err.message}); cloud fallback authorized — calling Grok.`);
-      const text = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
-      return { text, source: 'grok (fallback)' };
+    if (cfg.provider === 'local' && isLocalOutage(err)) {
+      if (OLLAMA_API_KEY) {
+        console.log(`[classify] Local outage → ollama/${OLLAMA_FALLBACK_MODEL}`);
+        const text = await callVisionChat('ollama', OLLAMA_FALLBACK_MODEL, imageBase64, systemPrompt, userPrompt);
+        return { text, source: 'ollama (fallback)' };
+      }
+      if (modelConfig.allowClassifyCloudFallback === true && XAI_API_KEY) {
+        console.log(`[classify] Local outage → xai/grok (fallback authorized)`);
+        const text = await callVisionChat('xai', 'grok-4-1-fast-non-reasoning', imageBase64, systemPrompt, userPrompt);
+        return { text, source: 'grok (fallback)' };
+      }
     }
     throw err;
   }
