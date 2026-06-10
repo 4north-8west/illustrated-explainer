@@ -2588,9 +2588,17 @@ async function openSettings() {
       let html = '';
       for (const [pid, prov] of Object.entries(registry)) {
         for (const m of prov.models) {
-          if (m.capabilities.includes(capability)) {
-            html += `<option value="${pid}/${m.id}">${prov.name} — ${m.name}</option>`;
+          if (!m.capabilities.includes(capability)) continue;
+          if (pid === 'local') {
+            // Show only the two virtual port-based options; hide all named Gemma variants
+            if (m.id === 'auto') {
+              html += `<option value="local/auto">Local — Small port (${current.localPorts?.small ?? 8080})</option>`;
+            } else if (m.id === 'large') {
+              html += `<option value="local/large">Local — Large port (${current.localPorts?.large ?? 8082})</option>`;
+            }
+            continue; // skip all other named local models
           }
+          html += `<option value="${escapeHtml(pid)}/${escapeHtml(m.id)}">${escapeHtml(prov.name)} — ${escapeHtml(m.name)}</option>`;
         }
       }
       return html;
@@ -2648,8 +2656,22 @@ async function openSettings() {
         <p class="setting-current">Current: ${current.drillText.provider}/${current.drillText.model}</p>
       </div>
 
+      <h3 class="settings-section-h">Local model ports</h3>
       <div class="setting-group">
-        <p class="desc"><strong>Local models with port overrides:</strong> the local registry in server.js can pin individual models to specific llama-server ports (e.g. 8080 for the small Gemma, 8082 for the medium 26B, 8083 for the 31B). Edit MODEL_REGISTRY.local in server.js to add or change ports.</p>
+        <label>Small model port
+          <small>Port for capabilities set to "Local — Small port". Typically your fast 4B model.</small>
+        </label>
+        <input type="number" class="setting-select" id="smallPortInput"
+          min="1" max="65535" step="1"
+          value="${current.localPorts?.small ?? 8080}"
+          style="width:90px;font-family:monospace">
+        <label style="margin-top:10px">Large model port
+          <small>Port for capabilities set to "Local — Large port". Typically your 26B/31B model.</small>
+        </label>
+        <input type="number" class="setting-select" id="largePortInput"
+          min="1" max="65535" step="1"
+          value="${current.localPorts?.large ?? 8082}"
+          style="width:90px;font-family:monospace">
       </div>
       <button class="save-settings-btn" id="saveSettingsBtn">Save</button>
     `;
@@ -2696,6 +2718,10 @@ async function openSettings() {
           drillText:  split('drillTextModelSelect'),
           localOnly:  $('localOnlyToggle').checked,
           allowClassifyCloudFallback: $('classifyCloudToggle').checked,
+          localPorts: {
+            small: parseInt($('smallPortInput').value, 10) || 8080,
+            large: parseInt($('largePortInput').value, 10) || 8082,
+          },
         }),
       });
       if (r.ok) { closePanel('settings'); } else { const d = await r.json(); showError(d.error); }
