@@ -1676,7 +1676,7 @@ app.post('/api/vault-search', async (req, res) => {
   const query = buildVaultQuery(intent, parentClassified).trim();
   if (!query) return res.json({ hits: [] });
   const result = await searchVault(query, { filters });
-  res.json({ hits: result.hits });
+  res.json({ hits: result.hits, vaultError: result.error ?? null });
 });
 
 app.post('/api/page', async (req, res) => {
@@ -1780,10 +1780,12 @@ app.post('/api/page', async (req, res) => {
           }
           let vaultHits = [];
           let vaultContext = '';
+          let vaultResult = { hits: [], error: null };
           if (vaultMode) {
             const vaultQuery = buildVaultQuery(intent, parentClassified);
             if (vaultQuery.trim()) {
-              const vaultResult = await searchVault(vaultQuery, { filters: vaultFilters });
+              vaultResult = await searchVault(vaultQuery, { filters: vaultFilters });
+              if (vaultResult.error) console.warn('[vault] page-gen search failed:', vaultResult.error);
               vaultHits = vaultResult.hits;
               vaultContext = buildVaultContextBlock(vaultHits);
             }
@@ -1807,7 +1809,7 @@ app.post('/api/page', async (req, res) => {
           pageMeta[id] = { folder, query: pageMeta[parentId]?.query, mode, type: 'markdown', parentId, parentClick: parentClickData, intent, responseDepth, language };
           saveMetadata(pageMeta);
           console.log(`Saved: ${textPath}`);
-          return { page, vaultHits };
+          return { page, vaultHits, vaultError: vaultResult.error ?? null };
         }
         if (responseKind === 'chart') {
           const chartPath = pageJsonPath(folder, id);
@@ -1927,8 +1929,10 @@ app.post('/api/page', async (req, res) => {
       return { id, type: 'image', imageUrl, parentId: parentPageId, parentClick: parentClickData, initialQuery, mode, analysisStatus: analysisStatus(id) };
     });
 
-    const { page: genPage, vaultHits: genVaultHits } = genResult?.page ? genResult : { page: genResult, vaultHits: [] };
-    res.json({ page: genPage, vaultHits: genVaultHits ?? [] });
+    const { page: genPage, vaultHits: genVaultHits, vaultError: genVaultError } = genResult?.page
+      ? genResult
+      : { page: genResult, vaultHits: [], vaultError: null };
+    res.json({ page: genPage, vaultHits: genVaultHits ?? [], vaultError: genVaultError ?? null });
   } catch (err) {
     console.error('Generation error:', err.message);
     const message = err.message?.includes('Keep it local is enabled') || err.message?.includes('No local image')

@@ -62,8 +62,9 @@ export async function searchVault(query, opts = {}) {
           frontMatter,
         };
       });
-    return { hits: applyFilters(hits, filters) };
-  } catch {
-    return { hits: [] };
+    return { hits: applyFilters(hits, filters), error: null };
+  } catch (err) {
+    console.error('[vault] searchVault failed:', err.message);
+    return { hits: [], error: err.message };
   }
 }

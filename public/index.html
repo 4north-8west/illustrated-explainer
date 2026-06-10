@@ -522,6 +522,7 @@ const sourceContextState = new Map(); // pageId -> pending | unavailable
 const inlineAnalysisRequests = {}; // pageId -> Promise
 const vaultHitsCache = new Map(); // pageId -> hits[]
 const vaultSearchInFlight = new Set(); // pageIds with active vault search
+const vaultErrorCache = new Map(); // pageId -> error string (when vault search fails)
 
 function renderVaultFilterChips() {
   function renderChips(containerId, rules, kind) {
@@ -2145,19 +2146,29 @@ function renderCurrentPage() {
     }
     // Vault Sources panel
     const currentVaultHits = vaultHitsCache.get(page.id);
+    const currentVaultError = vaultErrorCache.get(page.id) ?? null;
     if (state.vaultMode && page.type === 'markdown' && page.intent) {
       if (currentVaultHits?.length) {
         leftParts.push(renderVaultPanel(currentVaultHits));
+      } else if (currentVaultError) {
+        leftParts.push(`<section class="source-panel">
+      <h2>Vault Sources</h2>
+      <div class="empty-drill" style="color:#8b3a33;font-style:normal;">
+        Vault search unavailable — is <code>qmd</code> on PATH?<br>
+        <span style="font-size:11px;color:#aaa;">${escapeHtml(currentVaultError.slice(0, 120))}</span>
+      </div>
+    </section>`);
       } else if (!vaultHitsCache.has(page.id) && !vaultSearchInFlight.has(page.id)) {
         // Lazy search for cached drill pages that pre-date vault mode
         vaultSearchInFlight.add(page.id);
         fetch('/api/vault-search', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ parentId: page.parentId, intent: page.intent, vaultFilters: state.vaultFilters }),
-        }).then(r => r.json()).then(({ hits }) => {
+        }).then(r => r.json()).then(({ hits, vaultError }) => {
           vaultSearchInFlight.delete(page.id);
-          if (hits?.length) { vaultHitsCache.set(page.id, hits); renderCurrentPage(); }
-          else vaultHitsCache.set(page.id, []); // mark searched, no results
+          if (vaultError) vaultErrorCache.set(page.id, vaultError);
+          vaultHitsCache.set(page.id, hits?.length ? hits : []);
+          if (hits?.length || vaultError) renderCurrentPage();
         }).catch(() => vaultSearchInFlight.delete(page.id));
       }
     }
@@ -2277,7 +2288,8 @@ async function generateChildPage(parentId, x, y, responseKind = 'image', intent 
       }),
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Error ${res.status}`); }
-    const { page, vaultHits } = await res.json();
+    const { page, vaultHits, vaultError } = await res.json();
+    if (vaultError) vaultErrorCache.set(page.id, vaultError);
     if (vaultHits?.length) vaultHitsCache.set(page.id, vaultHits);
     state.pages.push(page);
     if (page.parentId && page.parentClick) {
