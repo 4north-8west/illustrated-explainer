@@ -2712,7 +2712,6 @@ app.post('/api/analysis/:pageId', async (req, res) => {
     return res.status(400).json({ error: 'Invalid page ID' });
   }
 
-  // Find the image file
   const meta = pageMeta[pageId];
   if (!meta) return res.status(404).json({ error: 'Page not found in metadata' });
 
@@ -2721,37 +2720,31 @@ app.post('/api/analysis/:pageId', async (req, res) => {
     return res.status(404).json({ error: 'Image file not found' });
   }
 
-  // v2 pipeline (2026-05-15): analysis is no longer a live vision call.
-  // Description comes from Call 1 (classify → .description), explanation
-  // comes from Call 2 (runConceptSynthesisForPage → .explanation). This
-  // endpoint just *ensures* the right calls have run and returns the cache.
-  try {
-    let existing = loadAnalysis(pageId) || { description: null, explanation: null };
-    const wantDescription = type === 'description' || type === 'both';
-    const wantExplanation = type === 'explanation' || type === 'both';
+  // v2 pipeline: fire-and-forget — do not block the HTTP response.
+  // The client reads `analyzing: true` and polls GET /api/intake/:pageId.
+  const existing = loadAnalysis(pageId) || {};
+  const wantDescription = type === 'description' || type === 'both';
+  const wantExplanation = type === 'explanation' || type === 'both';
+  let analyzing = false;
 
-    if (wantDescription && !existing.description) {
-      await enqueueImageIntake(pageId);
-      existing = loadAnalysis(pageId) || existing;
-    }
-
-    if (wantExplanation && !existing.explanation) {
-      // Synthesis needs the classified payload; intake produces it.
-      if (!existing.classified) {
-        await enqueueImageIntake(pageId);
-        existing = loadAnalysis(pageId) || existing;
-      }
-      if (existing.classified && !existing.classified.fallback_used) {
-        await enqueueSynthesis(pageId);
-        existing = loadAnalysis(pageId) || existing;
-      }
-    }
-
-    res.json(existing);
-  } catch (err) {
-    console.error('Analysis error:', err.message);
-    res.status(500).json({ error: `Analysis failed: ${err.message}` });
+  if (wantDescription && !existing.description) {
+    enqueueImageIntake(pageId);   // fire-and-forget
+    analyzing = true;
   }
+
+  if (wantExplanation && !existing.explanation) {
+    if (!existing.classified) {
+      // Intake runs classify first, synthesis queues automatically downstream
+      enqueueImageIntake(pageId); // fire-and-forget (idempotent — deduped if already running)
+      analyzing = true;
+    } else {
+      // C2 fix: attempt synthesis regardless of fallback_used on explicit user trigger
+      enqueueSynthesis(pageId);   // fire-and-forget
+      analyzing = true;
+    }
+  }
+
+  res.json({ ...existing, analyzing });
 });
 
 // --- Gallery API ---
