@@ -63,6 +63,8 @@ const DEFAULT_MODEL_CONFIG = {
   drillText:  { provider: 'local', model: 'auto' },               // drill TEXT generation (markdown / chart / table / diagram)
   // ── Cloud-fallback policy ───────────────────────────────────────────
   allowClassifyCloudFallback: false,
+  // ── Local model ports ───────────────────────────────────────────────
+  localPorts: { small: 8080, large: 8082 },
 };
 
 function loadModelConfig() {
@@ -125,7 +127,8 @@ const MODEL_REGISTRY = {
     // LLAMA_SERVER_URL is used.
     name: 'Local (llama-server)',
     models: {
-      'auto':                        { name: 'Auto-detect (whatever 8080 has loaded)', capabilities: ['analysis', 'classify', 'drillText'] },
+      'auto':  { name: 'Auto-detect (whatever small port has loaded)', capabilities: ['analysis', 'classify', 'drillText'] },
+      'large': { name: 'Large-port model', capabilities: ['analysis', 'classify', 'drillText'] },
       'gemma-4-E2B':                 { name: 'Gemma 4 E2B  · 2B vision · fastest, lower quality', capabilities: ['analysis', 'classify', 'drillText'] },
       'gemma-4-E4B':                 { name: 'Gemma 4 E4B  · 4B vision · balanced', capabilities: ['analysis', 'classify', 'drillText'] },
       'gemma-4-E4B-it-Q4_K_S':       { name: 'Gemma 4 E4B Q4_K_S  · 4B vision · current 8080 default', capabilities: ['analysis', 'classify', 'drillText'] },
@@ -158,6 +161,18 @@ const MODEL_REGISTRY = {
 function resolveChatUrl(provider, model) {
   const providerConfig = MODEL_REGISTRY[provider];
   if (!providerConfig) return null;
+  // Dynamic port resolution: local/auto → small port, local/large → large port.
+  // Named local models keep their hard-coded chatUrl.
+  if (provider === 'local') {
+    if (model === 'large') {
+      const port = modelConfig.localPorts?.large ?? 8082;
+      return `http://localhost:${port}/v1/chat/completions`;
+    }
+    if (model === 'auto') {
+      const port = modelConfig.localPorts?.small ?? 8080;
+      return `http://localhost:${port}/v1/chat/completions`;
+    }
+  }
   const modelConfigEntry = providerConfig.models?.[model];
   return modelConfigEntry?.chatUrl || providerConfig.chatUrl || null;
 }
@@ -1260,9 +1275,17 @@ app.get('/api/models', (_req, res) => {
 });
 
 app.post('/api/models', (req, res) => {
-  const { generation, editing, analysis, classify, drillText, localOnly, allowClassifyCloudFallback } = req.body;
+  const { generation, editing, analysis, classify, drillText, localOnly, allowClassifyCloudFallback, localPorts } = req.body;
   if (typeof localOnly === 'boolean') modelConfig.localOnly = localOnly;
   if (typeof allowClassifyCloudFallback === 'boolean') modelConfig.allowClassifyCloudFallback = allowClassifyCloudFallback;
+  if (localPorts && typeof localPorts === 'object') {
+    const small = parseInt(localPorts.small, 10);
+    const large = parseInt(localPorts.large, 10);
+    const current = modelConfig.localPorts ?? { small: 8080, large: 8082 };
+    if (Number.isInteger(small) && small > 0 && small < 65536) current.small = small;
+    if (Number.isInteger(large) && large > 0 && large < 65536) current.large = large;
+    modelConfig.localPorts = current;
+  }
   for (const [key, val] of [
     ['generation', generation],
     ['editing', editing],
