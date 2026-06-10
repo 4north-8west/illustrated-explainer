@@ -1087,9 +1087,8 @@ Previous JSON:
 ${JSON.stringify(chart, null, 2)}
 
 Return corrected JSON only. If the selected region cannot support a trustworthy chart, set chartability to "low", set fallbackRecommendation to the best non-chart format, leave points empty, and explain why in uncertainty.`;
-    const [retryProvider, retryModel] = usedFallback
-      ? (cloudFallback() ?? ['xai', 'grok-4-1-fast-non-reasoning'])
-      : [cfg.provider, cfg.model];
+    const retryFb = usedFallback ? cloudFallback() : null;
+    const [retryProvider, retryModel] = retryFb ?? [cfg.provider, cfg.model];
     const retryResult = await callVisionChat(retryProvider, retryModel, imageBase64, systemPrompt, retryPrompt);
     chart = normalizeChartSpec(parseJsonResponse(retryResult));
     validation = validateChartSpec(chart);
@@ -1097,8 +1096,7 @@ Return corrected JSON only. If the selected region cannot support a trustworthy 
 
   chart.validationIssues = validation.issues;
   chart.isReliable = validation.issues.length === 0 && chart.chartability !== 'low';
-  const [fbProv] = cloudFallback() ?? ['xai'];
-  const source = usedFallback ? `${fbProv} (fallback)` : (cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`);
+  const source = usedFallback ? `${retryProvider} (fallback)` : (cfg.provider === 'local' ? `local (${cfg.model})` : `${cfg.provider} (${cfg.model})`);
   return { chart, source };
 }
 
