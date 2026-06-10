@@ -2829,7 +2829,7 @@ async function runAnalysis(pageId, type) {
     learnCache[pageId] = data;
     if (data.analyzing) {
       renderLearnTab(); // keep spinner, start poll
-      pollLearnStatus(pageId);
+      pollLearnStatus(pageId, type);
     } else {
       learnAnalyzing = false;
       renderLearnTab();
@@ -2841,7 +2841,7 @@ async function runAnalysis(pageId, type) {
   }
 }
 
-function pollLearnStatus(pageId) {
+function pollLearnStatus(pageId, type) {
   if (learnPollTimer) clearTimeout(learnPollTimer);
   const myGen = ++pollGeneration; // capture; stale polls check this on resume
   const MAX_POLLS = 36; // 36 × 5s = 3 minutes
@@ -2861,7 +2861,12 @@ function pollLearnStatus(pageId) {
         analysisStatus.inFlight?.classify ||
         analysisStatus.inFlight?.intake   ||
         analysisStatus.inFlight?.synthesis;
-      const hasData = analysisStatus.description || analysisStatus.explanation;
+      const hasData =
+        type === 'both'
+          ? (analysisStatus.description && analysisStatus.explanation)
+          : type === 'description'
+            ? analysisStatus.description
+            : analysisStatus.explanation;
 
       if (hasData) {
         const freshRes = await fetch(`/api/analysis/${pageId}`);
