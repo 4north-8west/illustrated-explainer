@@ -64,7 +64,9 @@ const DEFAULT_MODEL_CONFIG = {
   // ── Cloud-fallback policy ───────────────────────────────────────────
   allowClassifyCloudFallback: false,
   // ── Local model ports ───────────────────────────────────────────────
-  localPorts: { small: 8080, large: 8082 },
+  // small_model / large_model: optional model name sent to multi-model servers
+  // (e.g. MLX service-dashboard). Leave blank for single-model llama-server.
+  localPorts: { small: 8080, small_model: '', large: 8082, large_model: '' },
 };
 
 function loadModelConfig() {
@@ -73,7 +75,13 @@ function loadModelConfig() {
     return {
       ...DEFAULT_MODEL_CONFIG,
       ...disk,
-      localPorts: { ...DEFAULT_MODEL_CONFIG.localPorts, ...(disk.localPorts ?? {}) },
+      localPorts: {
+        ...DEFAULT_MODEL_CONFIG.localPorts,
+        ...(disk.localPorts ?? {}),
+        // preserve string model-name fields even when not in disk config
+        small_model: disk.localPorts?.small_model ?? DEFAULT_MODEL_CONFIG.localPorts.small_model,
+        large_model: disk.localPorts?.large_model ?? DEFAULT_MODEL_CONFIG.localPorts.large_model,
+      },
     };
   } catch { return { ...DEFAULT_MODEL_CONFIG }; }
 }
@@ -181,6 +189,15 @@ function resolveChatUrl(provider, model) {
   }
   const modelConfigEntry = providerConfig.models?.[model];
   return modelConfigEntry?.chatUrl || providerConfig.chatUrl || null;
+}
+
+// Returns the model name to include in the request body for local provider,
+// or null if not configured (single-model servers like plain llama-server
+// don't need a model field; multi-model servers like MLX service-dashboard do).
+function resolveLocalModelName(model) {
+  const lp = modelConfig.localPorts;
+  if (model === 'large') return lp?.large_model || null;
+  return lp?.small_model || null;  // 'auto' and everything else → small slot
 }
 
 function isLocalOutage(err) {
@@ -1290,6 +1307,8 @@ app.post('/api/models', (req, res) => {
     const current = { ...DEFAULT_MODEL_CONFIG.localPorts, ...(modelConfig.localPorts ?? {}) };
     if (Number.isInteger(small) && small > 0 && small < 65536) current.small = small;
     if (Number.isInteger(large) && large > 0 && large < 65536) current.large = large;
+    if (typeof localPorts.small_model === 'string') current.small_model = localPorts.small_model.trim();
+    if (typeof localPorts.large_model === 'string') current.large_model = localPorts.large_model.trim();
     modelConfig.localPorts = current;
   }
   for (const [key, val] of [
@@ -1521,7 +1540,9 @@ async function callTextChat(provider, model, systemPrompt, userPrompt) {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      ...(provider !== 'local' ? { model } : {}),
+      ...(provider !== 'local'
+        ? { model }
+        : (resolveLocalModelName(model) ? { model: resolveLocalModelName(model) } : {})),
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -2077,7 +2098,9 @@ async function callVisionChat(provider, model, imageBase64, systemPrompt, userPr
       method: 'POST',
       headers,
       body: JSON.stringify({
-        ...(provider !== 'local' ? { model } : {}),
+        ...(provider !== 'local'
+          ? { model }
+          : (resolveLocalModelName(model) ? { model: resolveLocalModelName(model) } : {})),
         messages: [
           { role: 'system', content: systemPrompt },
           {

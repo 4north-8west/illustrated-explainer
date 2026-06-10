@@ -2665,6 +2665,12 @@ async function openSettings() {
           min="1" max="65535" step="1"
           value="${current.localPorts?.small ?? 8080}"
           style="width:90px;font-family:monospace">
+        <label style="margin-top:8px">Small model name <small>Model ID sent to multi-model servers (e.g. MLX service-dashboard). Leave blank for single-model llama-server.</small></label>
+        <input type="text" class="setting-select" id="smallModelNameInput"
+          placeholder="e.g. mlx-community/gemma-4-e4b-it-8bit"
+          value="${escapeHtml(current.localPorts?.small_model ?? '')}"
+          style="width:100%;font-family:monospace;font-size:12px">
+
         <label style="margin-top:10px">Large model port
           <small>Port for capabilities set to "Local — Large port". Typically your 26B/31B model.</small>
         </label>
@@ -2672,6 +2678,11 @@ async function openSettings() {
           min="1" max="65535" step="1"
           value="${current.localPorts?.large ?? 8082}"
           style="width:90px;font-family:monospace">
+        <label style="margin-top:8px">Large model name <small>Model ID for the large-port server.</small></label>
+        <input type="text" class="setting-select" id="largeModelNameInput"
+          placeholder="e.g. mlx-community/gemma-4-26b-a4b-it-4bit"
+          value="${escapeHtml(current.localPorts?.large_model ?? '')}"
+          style="width:100%;font-family:monospace;font-size:12px">
       </div>
       <button class="save-settings-btn" id="saveSettingsBtn">Save</button>
     `;
@@ -2721,6 +2732,8 @@ async function openSettings() {
           localPorts: {
             small: parseInt($('smallPortInput').value, 10) || 8080,
             large: parseInt($('largePortInput').value, 10) || 8082,
+            small_model: $('smallModelNameInput').value.trim(),
+            large_model: $('largeModelNameInput').value.trim(),
           },
         }),
       });
