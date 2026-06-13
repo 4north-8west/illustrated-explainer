@@ -507,6 +507,10 @@ function editableMode(mode) {
   };
 }
 
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function inferModeFromQuery(query) {
   const text = normalize(query);
   const hasMode = id => VALID_MODES.includes(id);
@@ -521,6 +525,19 @@ function inferModeFromQuery(query) {
 
   if (hasMode('science_process') && /\b(process|cycle|reaction|molecule|cell|organ|anatomy|photosynthesis|respiration|ecosystem|climate|weather|volcano|earthquake|plate tectonic|evolution|gravity|force|energy|electricity|magnetism|atom|protein|dna|rna|enzyme|immune|planet|star|orbit)\b/.test(text)) {
     return 'science_process';
+  }
+
+  for (const id of VALID_MODES) {
+    if (isBakedInMode(id)) continue;
+    const kw = MODES[id]?.inferKeywords;
+    if (!Array.isArray(kw) || kw.length === 0) continue;
+    const alternation = kw.map(escapeRegExp).join('|');
+    try {
+      const re = new RegExp(`\\b(${alternation})\\b`, 'i');
+      if (re.test(text)) return id;
+    } catch {
+      // skip a mode whose keywords produce an invalid regex
+    }
   }
 
   return hasMode('illustration') ? 'illustration' : VALID_MODES[0];
