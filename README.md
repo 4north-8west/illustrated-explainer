@@ -51,6 +51,10 @@ This release focuses on layout, presentation, and the reliability of typed respo
 - **Improved upload-context prompts.** The shared upload-context helper explicitly frames upload context as OCR/transcription evidence (visible text, labels, equations, axis names, legends, table structure) and instructs the model to prefer source-grounded values over the focused crop when the crop is ambiguous.
 - **Removed redundant Context panel.** The standalone Context button has been retired; source context now lives directly in the new three-column layout where it is always visible alongside the image.
 
+## Mode editor
+
+Open Settings → Modes to create, edit, duplicate, delete, or reset modes from the browser. Custom modes are saved as JSON files under `modes/` and are git-trackable. The four baked-in modes (Illustration, Historical Map, Math, Science) can be overridden but never destroyed — use Reset to restore the baked-in default. Custom modes can declare `inferKeywords` so `auto` detection picks them up.
+
 ## Quick Start
 
 ```bash

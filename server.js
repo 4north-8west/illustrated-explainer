@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 dotenv.config({ override: true });
+import Ajv from 'ajv';
 import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -249,6 +250,31 @@ function uploadContextPageId(pageId) {
 
 // --- Mode templates ---
 
+const MODE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'label', 'tagLabel', 'style', 'firstPageTemplate', 'childPageTemplate', 'modeLabelForPrompt'],
+  properties: {
+    id:                  { type: 'string', pattern: '^[a-z][a-z0-9_]{0,30}$' },
+    label:               { type: 'string', minLength: 1, maxLength: 60 },
+    tagLabel:            { type: 'string', minLength: 1, maxLength: 30 },
+    placeholder:         { type: 'string', maxLength: 200 },
+    description:         { type: 'string', maxLength: 500 },
+    style:               { type: 'string', minLength: 1, maxLength: 8000 },
+    firstPageTemplate:   { type: 'string', minLength: 1, maxLength: 8000 },
+    childPageTemplate:   { type: 'string', minLength: 1, maxLength: 8000 },
+    modeLabelForPrompt:  { type: 'string', minLength: 1, maxLength: 60 },
+    inferKeywords: {
+      type: 'array',
+      maxItems: 40,
+      items: { type: 'string', minLength: 2, maxLength: 40 },
+    },
+  },
+};
+
+const ajv = new Ajv({ allErrors: true });
+const validateMode = ajv.compile(MODE_SCHEMA);
+
 const FALLBACK_MODES = {
   illustration: {
     style: `Painting style (must remain consistent across every page):
@@ -384,6 +410,7 @@ function normalizeModeConfig(mode, fallbackId = null) {
     firstPageTemplate,
     childPageTemplate,
     modeLabelForPrompt: mode.modeLabelForPrompt || mode.label || id.replace(/_/g, ' '),
+    inferKeywords: Array.isArray(mode.inferKeywords) ? mode.inferKeywords : [],
   };
 }
 
@@ -416,6 +443,74 @@ function loadModes() {
 let MODES = loadModes();
 let VALID_MODES = Object.keys(MODES);
 
+// Capture the set of modes that ship with the app — anything present at boot
+// is treated as baked-in (un-deletable) regardless of whether it came from
+// FALLBACK_MODES or a shipped JSON file. A deep snapshot of each mode's
+// normalized content is kept so Reset can restore the original for IDs that
+// don't live in FALLBACK_MODES (math_equation, science_process).
+const BAKED_IN_IDS = new Set(Object.keys(MODES));
+const BAKED_IN_SNAPSHOTS = {};
+for (const id of BAKED_IN_IDS) {
+  BAKED_IN_SNAPSHOTS[id] = JSON.parse(JSON.stringify(MODES[id]));
+}
+
+function sanitizeModeId(id) {
+  return typeof id === 'string' && /^[a-z][a-z0-9_]{0,30}$/.test(id);
+}
+
+function isBakedInMode(id) {
+  return BAKED_IN_IDS.has(id);
+}
+
+function bakedInSnapshot(id) {
+  return BAKED_IN_SNAPSHOTS[id] ? JSON.parse(JSON.stringify(BAKED_IN_SNAPSHOTS[id])) : null;
+}
+
+function modeFilePath(id) {
+  const filePath = path.join(MODES_DIR, `${id}.json`);
+  const resolved = path.resolve(filePath);
+  if (path.dirname(resolved) !== path.resolve(MODES_DIR)) {
+    throw new Error(`Refusing to operate outside modes/ for id: ${id}`);
+  }
+  return resolved;
+}
+
+// "Overlay" means the current mode content differs from the boot-time snapshot.
+// For non-baked-in (user-created) modes, this is always false — they have no
+// snapshot to diverge from.
+function modeHasOverlay(id) {
+  if (!isBakedInMode(id)) return false;
+  const snap = BAKED_IN_SNAPSHOTS[id];
+  if (!snap) return false;
+  return JSON.stringify(MODES[id]) !== JSON.stringify(snap);
+}
+
+function reloadModes() {
+  MODES = loadModes();
+  VALID_MODES = Object.keys(MODES);
+}
+
+function editableMode(mode) {
+  return {
+    id: mode.id,
+    label: mode.label,
+    tagLabel: mode.tagLabel,
+    placeholder: mode.placeholder,
+    description: mode.description,
+    style: mode.style,
+    firstPageTemplate: mode.firstPageTemplate,
+    childPageTemplate: mode.childPageTemplate,
+    modeLabelForPrompt: mode.modeLabelForPrompt,
+    inferKeywords: Array.isArray(mode.inferKeywords) ? mode.inferKeywords : [],
+    bakedIn: isBakedInMode(mode.id),
+    hasOverlay: modeHasOverlay(mode.id),
+  };
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function inferModeFromQuery(query) {
   const text = normalize(query);
   const hasMode = id => VALID_MODES.includes(id);
@@ -430,6 +525,19 @@ function inferModeFromQuery(query) {
 
   if (hasMode('science_process') && /\b(process|cycle|reaction|molecule|cell|organ|anatomy|photosynthesis|respiration|ecosystem|climate|weather|volcano|earthquake|plate tectonic|evolution|gravity|force|energy|electricity|magnetism|atom|protein|dna|rna|enzyme|immune|planet|star|orbit)\b/.test(text)) {
     return 'science_process';
+  }
+
+  for (const id of VALID_MODES) {
+    if (isBakedInMode(id)) continue;
+    const kw = MODES[id]?.inferKeywords;
+    if (!Array.isArray(kw) || kw.length === 0) continue;
+    const alternation = kw.map(escapeRegExp).join('|');
+    try {
+      const re = new RegExp(`\\b(${alternation})\\b`, 'i');
+      if (re.test(text)) return id;
+    } catch {
+      // skip a mode whose keywords produce an invalid regex
+    }
   }
 
   return hasMode('illustration') ? 'illustration' : VALID_MODES[0];
@@ -1281,6 +1389,119 @@ app.get('/api/modes', (_req, res) => {
   res.json({
     modes: VALID_MODES.map(id => publicMode(MODES[id])),
     defaultMode: VALID_MODES.includes('illustration') ? 'illustration' : VALID_MODES[0],
+  });
+});
+
+app.get('/api/modes/raw', (_req, res) => {
+  res.json({
+    modes: VALID_MODES.map(id => editableMode(MODES[id])),
+    bakedInIds: [...BAKED_IN_IDS],
+  });
+});
+
+const modeJsonParser = express.json({ limit: '64kb' });
+
+app.post('/api/modes/:id', modeJsonParser, (req, res) => {
+  const { id } = req.params;
+  if (!sanitizeModeId(id)) {
+    return res.status(400).json({ error: 'Invalid mode id' });
+  }
+  const payload = req.body && typeof req.body === 'object' ? req.body : {};
+  if (payload.id && payload.id !== id) {
+    return res.status(400).json({ error: 'Path id and body id must match' });
+  }
+  payload.id = id;
+
+  if (!validateMode(payload)) {
+    return res.status(400).json({
+      error: 'Validation failed',
+      details: validateMode.errors,
+    });
+  }
+  if (!payload.firstPageTemplate.includes('{{query}}')) {
+    return res.status(400).json({
+      error: 'firstPageTemplate must contain {{query}}',
+    });
+  }
+
+  let filePath;
+  try {
+    filePath = modeFilePath(id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+    reloadModes();
+  } catch (err) {
+    return res.status(500).json({ error: `Failed to write mode: ${err.message}` });
+  }
+
+  res.json({
+    modes: VALID_MODES.map(id => publicMode(MODES[id])),
+    defaultMode: VALID_MODES.includes('illustration') ? 'illustration' : VALID_MODES[0],
+    saved: editableMode(MODES[id]),
+  });
+});
+
+app.delete('/api/modes/:id', (req, res) => {
+  const { id } = req.params;
+  if (!sanitizeModeId(id)) {
+    return res.status(400).json({ error: 'Invalid mode id' });
+  }
+  if (isBakedInMode(id)) {
+    return res.status(400).json({ error: 'Cannot delete a baked-in mode; use reset instead' });
+  }
+  let filePath;
+  try {
+    filePath = modeFilePath(id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Mode not found' });
+  }
+  try {
+    fs.unlinkSync(filePath);
+    reloadModes();
+  } catch (err) {
+    return res.status(500).json({ error: `Failed to delete mode: ${err.message}` });
+  }
+  res.json({
+    modes: VALID_MODES.map(modeId => publicMode(MODES[modeId])),
+    defaultMode: VALID_MODES.includes('illustration') ? 'illustration' : VALID_MODES[0],
+  });
+});
+
+app.post('/api/modes/:id/reset', (req, res) => {
+  const { id } = req.params;
+  if (!sanitizeModeId(id)) {
+    return res.status(400).json({ error: 'Invalid mode id' });
+  }
+  if (!isBakedInMode(id)) {
+    return res.status(400).json({ error: 'Only baked-in modes can be reset' });
+  }
+  let filePath;
+  try {
+    filePath = modeFilePath(id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const snap = bakedInSnapshot(id);
+  if (!snap) {
+    return res.status(500).json({ error: `No snapshot available for ${id}` });
+  }
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(snap, null, 2) + '\n', 'utf8');
+    reloadModes();
+  } catch (err) {
+    return res.status(500).json({ error: `Failed to reset mode: ${err.message}` });
+  }
+  res.json({
+    modes: VALID_MODES.map(modeId => publicMode(MODES[modeId])),
+    defaultMode: VALID_MODES.includes('illustration') ? 'illustration' : VALID_MODES[0],
+    saved: editableMode(MODES[id]),
   });
 });
 

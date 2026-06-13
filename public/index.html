@@ -385,6 +385,26 @@
 .vault-hit-title { font-size: 12px; font-weight: 500; color: #2c2a28; line-height: 1.35; }
 .vault-hit-score { font-size: 10px; font-family: monospace; color: #aaa; white-space: nowrap; margin-top: 1px; }
 .vault-hit-path { font-size: 10px; font-family: monospace; color: #999; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.settings-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e8e0d0; }
+.settings-section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.settings-section-header h3 { font-size: 14px; margin: 0; color: #6b5a3e; }
+.settings-action-btn { padding: 4px 12px; background: #6b5a3e; color: #fff; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit; }
+.settings-action-btn:hover { background: #564a32; }
+.mode-list { display: flex; flex-direction: column; gap: 6px; }
+.mode-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #faf3e3; border-radius: 6px; }
+.mode-row-label { flex: 1; font-size: 13px; color: #4a3f2a; }
+.mode-row-tag { font-size: 10px; padding: 1px 7px; border-radius: 3px; background: #e8e0d0; color: #6b5a3e; }
+.mode-row-btn { padding: 3px 10px; background: #fff; border: 1px solid #d6cfc7; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: inherit; color: #555; }
+.mode-row-btn:hover { background: #f5ebd3; border-color: #b8a06f; }
+.mode-row-btn.danger { color: #a02020; border-color: #d8b0b0; }
+.mode-row-btn.danger:hover { background: #fbe6e6; }
+.mode-editor-panel { margin-top: 12px; padding: 12px; background: #fff; border: 1px solid #d6cfc7; border-radius: 6px; }
+.mode-editor-panel label { display: block; font-size: 11px; color: #6b5a3e; margin-top: 8px; margin-bottom: 3px; }
+.mode-editor-panel input[type="text"],
+.mode-editor-panel textarea { width: 100%; padding: 6px 8px; border: 1px solid #d6cfc7; border-radius: 4px; font-family: inherit; font-size: 12px; box-sizing: border-box; }
+.mode-editor-panel textarea { font-family: ui-monospace, monospace; min-height: 80px; resize: vertical; }
+.mode-editor-panel .editor-actions { margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end; }
+.mode-editor-panel .field-error { color: #a02020; font-size: 11px; margin-top: 2px; }
 </style>
 <script>
   window.MathJax = {
@@ -506,6 +526,7 @@ const state = {
   drillMode: false,
   mode: 'auto',
   modes: [],
+  editableModes: [],
   responseDepth: 'explain',
   language: '',
   pendingClick: null, // { x, y } — awaiting confirmation
@@ -547,11 +568,12 @@ function renderVaultFilterChips() {
 }
 
 function escapeHtml(text) {
-  return String(text)
+  return String(text ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function renderMath(root = document.body) {
@@ -766,6 +788,188 @@ async function loadModes() {
     console.warn('Failed to load modes:', err);
     state.modes = [];
     renderModeSelector();
+  }
+}
+
+async function loadEditableModes() {
+  try {
+    const res = await fetch('/api/modes/raw');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.editableModes = data.modes || [];
+    renderModeList();
+  } catch (err) {
+    console.warn('loadEditableModes failed:', err);
+  }
+}
+
+function renderModeList() {
+  const container = document.getElementById('modeListContainer');
+  if (!container) return;
+  container.innerHTML = '';
+  for (const m of state.editableModes) {
+    const row = document.createElement('div');
+    row.className = 'mode-row';
+    const label = document.createElement('span');
+    label.className = 'mode-row-label';
+    label.textContent = m.label;
+    const tag = document.createElement('span');
+    tag.className = 'mode-row-tag';
+    tag.textContent = m.bakedIn ? 'baked-in' : 'custom';
+    const editBtn = document.createElement('button');
+    editBtn.className = 'mode-row-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => openModeEditor(m.id));
+    row.append(label, tag, editBtn);
+    if (m.bakedIn && m.hasOverlay) {
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'mode-row-btn';
+      resetBtn.textContent = 'Reset';
+      resetBtn.addEventListener('click', () => resetMode(m.id));
+      row.append(resetBtn);
+    }
+    if (!m.bakedIn) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'mode-row-btn danger';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', () => deleteMode(m.id));
+      row.append(delBtn);
+    }
+    container.append(row);
+  }
+}
+
+function openModeEditor(id) {
+  const panel = document.getElementById('modeEditorPanel');
+  if (!panel) return;
+  const existing = id ? state.editableModes.find(m => m.id === id) : null;
+  const isNew = !existing;
+  const m = existing || {
+    id: '', label: '', tagLabel: '', placeholder: '', description: '',
+    style: '', firstPageTemplate: '', childPageTemplate: '',
+    modeLabelForPrompt: '', inferKeywords: [], bakedIn: false, hasOverlay: false,
+  };
+  panel.hidden = false;
+  panel.innerHTML = `
+    <label>id <input type="text" id="me-id" value="${escapeHtml(m.id)}" ${isNew ? '' : 'readonly'} placeholder="lower_snake_case"></label>
+    <label>label <input type="text" id="me-label" value="${escapeHtml(m.label)}"></label>
+    <label>tagLabel <input type="text" id="me-tagLabel" value="${escapeHtml(m.tagLabel)}"></label>
+    <label>placeholder <input type="text" id="me-placeholder" value="${escapeHtml(m.placeholder || '')}"></label>
+    <label>description <input type="text" id="me-description" value="${escapeHtml(m.description || '')}"></label>
+    <label>style <textarea id="me-style">${escapeHtml(m.style)}</textarea></label>
+    <label>firstPageTemplate (must contain {{query}}) <textarea id="me-firstPageTemplate">${escapeHtml(m.firstPageTemplate)}</textarea></label>
+    <label>childPageTemplate <textarea id="me-childPageTemplate">${escapeHtml(m.childPageTemplate)}</textarea></label>
+    <label>modeLabelForPrompt <input type="text" id="me-modeLabelForPrompt" value="${escapeHtml(m.modeLabelForPrompt)}"></label>
+    <label>inferKeywords (comma-separated, optional) <input type="text" id="me-inferKeywords" value="${escapeHtml((m.inferKeywords || []).join(', '))}"></label>
+    <div class="field-error" id="me-error" hidden></div>
+    <div class="editor-actions">
+      <button type="button" id="me-cancel" class="mode-row-btn">Cancel</button>
+      <button type="button" id="me-save" class="settings-action-btn">Save</button>
+    </div>
+  `;
+  document.getElementById('me-cancel').addEventListener('click', () => { panel.hidden = true; panel.innerHTML = ''; });
+  document.getElementById('me-save').addEventListener('click', submitModeForm);
+}
+
+async function submitModeForm() {
+  const errorEl = document.getElementById('me-error');
+  errorEl.hidden = true;
+  errorEl.textContent = '';
+
+  const idEl = document.getElementById('me-id');
+  const id = (idEl.value || '').trim();
+  if (!/^[a-z][a-z0-9_]{0,30}$/.test(id)) {
+    errorEl.textContent = 'id must be lower_snake_case, start with a letter, max 31 chars';
+    errorEl.hidden = false;
+    return;
+  }
+
+  const payload = {
+    id,
+    label: document.getElementById('me-label').value.trim(),
+    tagLabel: document.getElementById('me-tagLabel').value.trim(),
+    placeholder: document.getElementById('me-placeholder').value,
+    description: document.getElementById('me-description').value,
+    style: document.getElementById('me-style').value,
+    firstPageTemplate: document.getElementById('me-firstPageTemplate').value,
+    childPageTemplate: document.getElementById('me-childPageTemplate').value,
+    modeLabelForPrompt: document.getElementById('me-modeLabelForPrompt').value.trim(),
+    inferKeywords: document.getElementById('me-inferKeywords').value
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
+  };
+  if (payload.inferKeywords.length === 0) delete payload.inferKeywords;
+
+  try {
+    const res = await fetch(`/api/modes/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      errorEl.textContent = data.error || `HTTP ${res.status}`;
+      errorEl.hidden = false;
+      return;
+    }
+    const data = await res.json();
+    state.modes = data.modes || [];
+    await loadEditableModes();
+    renderModeSelector();
+    reconcileActiveMode();
+    document.getElementById('modeEditorPanel').hidden = true;
+    document.getElementById('modeEditorPanel').innerHTML = '';
+  } catch (err) {
+    errorEl.textContent = String(err.message || err);
+    errorEl.hidden = false;
+  }
+}
+
+function reconcileActiveMode() {
+  if (state.mode === 'auto') return;
+  if (!state.modes.find(m => m.id === state.mode)) {
+    state.mode = 'auto';
+    const select = document.getElementById('modeSelect');
+    if (select) select.value = 'auto';
+  }
+}
+
+async function deleteMode(id) {
+  if (!confirm(`Delete mode "${id}"? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/api/modes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(`Delete failed: ${data.error || res.status}`);
+      return;
+    }
+    const data = await res.json();
+    state.modes = data.modes || [];
+    await loadEditableModes();
+    renderModeSelector();
+    reconcileActiveMode();
+  } catch (err) {
+    alert(`Delete failed: ${err.message}`);
+  }
+}
+
+async function resetMode(id) {
+  if (!confirm(`Reset "${id}" will discard your edits and restore the baked-in default. Continue?`)) return;
+  try {
+    const res = await fetch(`/api/modes/${encodeURIComponent(id)}/reset`, { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(`Reset failed: ${data.error || res.status}`);
+      return;
+    }
+    const data = await res.json();
+    state.modes = data.modes || [];
+    await loadEditableModes();
+    renderModeSelector();
+    reconcileActiveMode();
+  } catch (err) {
+    alert(`Reset failed: ${err.message}`);
   }
 }
 
@@ -2685,6 +2889,15 @@ async function openSettings() {
           style="width:100%;font-family:monospace;font-size:12px">
       </div>
       <button class="save-settings-btn" id="saveSettingsBtn">Save</button>
+
+      <section class="settings-section" id="modesSection">
+        <header class="settings-section-header">
+          <h3>Modes</h3>
+          <button type="button" id="newModeBtn" class="settings-action-btn">+ New Mode</button>
+        </header>
+        <div id="modeListContainer" class="mode-list"></div>
+        <div id="modeEditorPanel" class="mode-editor-panel" hidden></div>
+      </section>
     `;
 
     $('genModelSelect').value = `${current.generation.provider}/${current.generation.model}`;
@@ -2740,6 +2953,12 @@ async function openSettings() {
       if (r.ok) { closePanel('settings'); } else { const d = await r.json(); showError(d.error); }
     };
   } catch (err) { $('settingsBody').innerHTML = `<p style="color:#b91c1c">Error: ${err.message}</p>`; }
+  loadEditableModes();
+  const newBtn = document.getElementById('newModeBtn');
+  if (newBtn && !newBtn.dataset.bound) {
+    newBtn.dataset.bound = '1';
+    newBtn.addEventListener('click', () => openModeEditor());
+  }
 }
 
 // --- Learn / Analysis ---
