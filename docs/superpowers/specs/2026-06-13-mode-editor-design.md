@@ -72,7 +72,7 @@ Two invariants the design enforces:
 | `GET /api/modes/raw` handler | returns array of `editableMode` shapes, each with `bakedIn: boolean` and `hasOverlay: boolean` | New route |
 | `POST /api/modes/:id` handler | validate → write → reload → return updated `publicMode` list | New route |
 | `DELETE /api/modes/:id` handler | reject if baked-in → unlink file → reload | New route |
-| `POST /api/modes/:id/reset` handler | reject if not baked-in → unlink overlay file → reload | New route |
+| `POST /api/modes/:id/reset` handler | reject if not baked-in → write `BAKED_IN_SNAPSHOTS[id]` to file → reload | New route |
 
 ### Frontend (all in `public/index.html` — no new files)
 
@@ -124,8 +124,11 @@ Two invariants the design enforces:
 Reset (baked-in only):
   POST /api/modes/illustration/reset
   → if !isBakedInMode → 400
-  → fs.unlinkSync(modes/illustration.json) if it exists
-  → reloadModes() → FALLBACK_MODES.illustration becomes effective again
+  → fs.writeFileSync(modes/illustration.json, JSON.stringify(BAKED_IN_SNAPSHOTS[id], null, 2))
+  → reloadModes() → the snapshot content is now effective again
+  (note: this approach also works for math_equation and science_process,
+   which are baked-in by virtue of shipping in modes/ but have no
+   FALLBACK_MODES inline entry to fall back to)
 
 Delete (custom only):
   DELETE /api/modes/lab_diagrams
