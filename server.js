@@ -1358,6 +1358,13 @@ app.get('/api/modes', (_req, res) => {
   });
 });
 
+app.get('/api/modes/raw', (_req, res) => {
+  res.json({
+    modes: VALID_MODES.map(id => editableMode(MODES[id])),
+    bakedInIds: Object.keys(FALLBACK_MODES),
+  });
+});
+
 app.get('/api/models', (_req, res) => {
   const registry = {};
   for (const [providerId, provider] of Object.entries(MODEL_REGISTRY)) {
