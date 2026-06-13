@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 dotenv.config({ override: true });
+import Ajv from 'ajv';
 import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -249,6 +250,31 @@ function uploadContextPageId(pageId) {
 
 // --- Mode templates ---
 
+const MODE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'label', 'tagLabel', 'style', 'firstPageTemplate', 'childPageTemplate', 'modeLabelForPrompt'],
+  properties: {
+    id:                  { type: 'string', pattern: '^[a-z][a-z0-9_]{0,30}$' },
+    label:               { type: 'string', minLength: 1, maxLength: 60 },
+    tagLabel:            { type: 'string', minLength: 1, maxLength: 30 },
+    placeholder:         { type: 'string', maxLength: 200 },
+    description:         { type: 'string', maxLength: 500 },
+    style:               { type: 'string', minLength: 1, maxLength: 8000 },
+    firstPageTemplate:   { type: 'string', minLength: 1, maxLength: 8000 },
+    childPageTemplate:   { type: 'string', minLength: 1, maxLength: 8000 },
+    modeLabelForPrompt:  { type: 'string', minLength: 1, maxLength: 60 },
+    inferKeywords: {
+      type: 'array',
+      maxItems: 40,
+      items: { type: 'string', minLength: 2, maxLength: 40 },
+    },
+  },
+};
+
+const ajv = new Ajv({ allErrors: true });
+const validateMode = ajv.compile(MODE_SCHEMA);
+
 const FALLBACK_MODES = {
   illustration: {
     style: `Painting style (must remain consistent across every page):
@@ -384,6 +410,7 @@ function normalizeModeConfig(mode, fallbackId = null) {
     firstPageTemplate,
     childPageTemplate,
     modeLabelForPrompt: mode.modeLabelForPrompt || mode.label || id.replace(/_/g, ' '),
+    inferKeywords: Array.isArray(mode.inferKeywords) ? mode.inferKeywords : [],
   };
 }
 
@@ -415,6 +442,53 @@ function loadModes() {
 
 let MODES = loadModes();
 let VALID_MODES = Object.keys(MODES);
+
+function sanitizeModeId(id) {
+  return typeof id === 'string' && /^[a-z][a-z0-9_]{0,30}$/.test(id);
+}
+
+function isBakedInMode(id) {
+  return Object.prototype.hasOwnProperty.call(FALLBACK_MODES, id);
+}
+
+function modeFilePath(id) {
+  const filePath = path.join(MODES_DIR, `${id}.json`);
+  const resolved = path.resolve(filePath);
+  if (path.dirname(resolved) !== path.resolve(MODES_DIR)) {
+    throw new Error(`Refusing to operate outside modes/ for id: ${id}`);
+  }
+  return resolved;
+}
+
+function modeHasOverlay(id) {
+  try {
+    return fs.existsSync(modeFilePath(id));
+  } catch {
+    return false;
+  }
+}
+
+function reloadModes() {
+  MODES = loadModes();
+  VALID_MODES = Object.keys(MODES);
+}
+
+function editableMode(mode) {
+  return {
+    id: mode.id,
+    label: mode.label,
+    tagLabel: mode.tagLabel,
+    placeholder: mode.placeholder,
+    description: mode.description,
+    style: mode.style,
+    firstPageTemplate: mode.firstPageTemplate,
+    childPageTemplate: mode.childPageTemplate,
+    modeLabelForPrompt: mode.modeLabelForPrompt,
+    inferKeywords: Array.isArray(mode.inferKeywords) ? mode.inferKeywords : [],
+    bakedIn: isBakedInMode(mode.id),
+    hasOverlay: modeHasOverlay(mode.id),
+  };
+}
 
 function inferModeFromQuery(query) {
   const text = normalize(query);
