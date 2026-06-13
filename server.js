@@ -1382,6 +1382,52 @@ app.get('/api/modes/raw', (_req, res) => {
   });
 });
 
+const modeJsonParser = express.json({ limit: '64kb' });
+
+app.post('/api/modes/:id', modeJsonParser, (req, res) => {
+  const { id } = req.params;
+  if (!sanitizeModeId(id)) {
+    return res.status(400).json({ error: 'Invalid mode id' });
+  }
+  const payload = req.body && typeof req.body === 'object' ? req.body : {};
+  if (payload.id && payload.id !== id) {
+    return res.status(400).json({ error: 'Path id and body id must match' });
+  }
+  payload.id = id;
+
+  if (!validateMode(payload)) {
+    return res.status(400).json({
+      error: 'Validation failed',
+      details: validateMode.errors,
+    });
+  }
+  if (!payload.firstPageTemplate.includes('{{query}}')) {
+    return res.status(400).json({
+      error: 'firstPageTemplate must contain {{query}}',
+    });
+  }
+
+  let filePath;
+  try {
+    filePath = modeFilePath(id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+    reloadModes();
+  } catch (err) {
+    return res.status(500).json({ error: `Failed to write mode: ${err.message}` });
+  }
+
+  res.json({
+    modes: VALID_MODES.map(id => publicMode(MODES[id])),
+    defaultMode: VALID_MODES.includes('illustration') ? 'illustration' : VALID_MODES[0],
+    saved: editableMode(MODES[id]),
+  });
+});
+
 app.get('/api/models', (_req, res) => {
   const registry = {};
   for (const [providerId, provider] of Object.entries(MODEL_REGISTRY)) {
