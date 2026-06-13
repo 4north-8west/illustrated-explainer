@@ -1428,6 +1428,66 @@ app.post('/api/modes/:id', modeJsonParser, (req, res) => {
   });
 });
 
+app.delete('/api/modes/:id', (req, res) => {
+  const { id } = req.params;
+  if (!sanitizeModeId(id)) {
+    return res.status(400).json({ error: 'Invalid mode id' });
+  }
+  if (isBakedInMode(id)) {
+    return res.status(400).json({ error: 'Cannot delete a baked-in mode; use reset instead' });
+  }
+  let filePath;
+  try {
+    filePath = modeFilePath(id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Mode not found' });
+  }
+  try {
+    fs.unlinkSync(filePath);
+    reloadModes();
+  } catch (err) {
+    return res.status(500).json({ error: `Failed to delete mode: ${err.message}` });
+  }
+  res.json({
+    modes: VALID_MODES.map(modeId => publicMode(MODES[modeId])),
+    defaultMode: VALID_MODES.includes('illustration') ? 'illustration' : VALID_MODES[0],
+  });
+});
+
+app.post('/api/modes/:id/reset', (req, res) => {
+  const { id } = req.params;
+  if (!sanitizeModeId(id)) {
+    return res.status(400).json({ error: 'Invalid mode id' });
+  }
+  if (!isBakedInMode(id)) {
+    return res.status(400).json({ error: 'Only baked-in modes can be reset' });
+  }
+  let filePath;
+  try {
+    filePath = modeFilePath(id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const snap = bakedInSnapshot(id);
+  if (!snap) {
+    return res.status(500).json({ error: `No snapshot available for ${id}` });
+  }
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(snap, null, 2) + '\n', 'utf8');
+    reloadModes();
+  } catch (err) {
+    return res.status(500).json({ error: `Failed to reset mode: ${err.message}` });
+  }
+  res.json({
+    modes: VALID_MODES.map(modeId => publicMode(MODES[modeId])),
+    defaultMode: VALID_MODES.includes('illustration') ? 'illustration' : VALID_MODES[0],
+    saved: editableMode(MODES[id]),
+  });
+});
+
 app.get('/api/models', (_req, res) => {
   const registry = {};
   for (const [providerId, provider] of Object.entries(MODEL_REGISTRY)) {
