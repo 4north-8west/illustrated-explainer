@@ -52,8 +52,10 @@
 ```
 
 Two invariants the design enforces:
-1. **`FALLBACK_MODES` is never mutated.** It's the reset target. The four baked-in modes are always recoverable even if every file in `modes/` is corrupted or deleted.
+1. **The set of baked-in modes is captured at boot.** At server start, `BAKED_IN_IDS = new Set(Object.keys(loadModes()))` snapshots the IDs and `BAKED_IN_SNAPSHOTS[id]` deep-copies each mode's normalized content. Baked-in modes are un-deletable and resettable for the lifetime of the process. This handles the asymmetry where some modes (`illustration`, `historical_map`) live in `FALLBACK_MODES` while others (`math_equation`, `science_process`) ship only as on-disk JSON — both are treated as baked-in.
 2. **All file writes are confined to `modes/`.** Path is constructed as `path.join(MODES_DIR, sanitizeId(id) + '.json')` and the resolved path's parent must equal `MODES_DIR`.
+
+`hasOverlay` therefore means "the current normalized mode content differs from the boot-time snapshot" — not merely "a file exists on disk." On a fresh boot all four baked-in modes report `hasOverlay: false`; the flag flips to `true` only after a user edits and saves a baked-in mode. Reset writes the snapshot back to `modes/<id>.json` and calls `reloadModes()`.
 
 ## Components
 

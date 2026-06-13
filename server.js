@@ -443,12 +443,27 @@ function loadModes() {
 let MODES = loadModes();
 let VALID_MODES = Object.keys(MODES);
 
+// Capture the set of modes that ship with the app — anything present at boot
+// is treated as baked-in (un-deletable) regardless of whether it came from
+// FALLBACK_MODES or a shipped JSON file. A deep snapshot of each mode's
+// normalized content is kept so Reset can restore the original for IDs that
+// don't live in FALLBACK_MODES (math_equation, science_process).
+const BAKED_IN_IDS = new Set(Object.keys(MODES));
+const BAKED_IN_SNAPSHOTS = {};
+for (const id of BAKED_IN_IDS) {
+  BAKED_IN_SNAPSHOTS[id] = JSON.parse(JSON.stringify(MODES[id]));
+}
+
 function sanitizeModeId(id) {
   return typeof id === 'string' && /^[a-z][a-z0-9_]{0,30}$/.test(id);
 }
 
 function isBakedInMode(id) {
-  return Object.prototype.hasOwnProperty.call(FALLBACK_MODES, id);
+  return BAKED_IN_IDS.has(id);
+}
+
+function bakedInSnapshot(id) {
+  return BAKED_IN_SNAPSHOTS[id] ? JSON.parse(JSON.stringify(BAKED_IN_SNAPSHOTS[id])) : null;
 }
 
 function modeFilePath(id) {
@@ -460,12 +475,14 @@ function modeFilePath(id) {
   return resolved;
 }
 
+// "Overlay" means the current mode content differs from the boot-time snapshot.
+// For non-baked-in (user-created) modes, this is always false — they have no
+// snapshot to diverge from.
 function modeHasOverlay(id) {
-  try {
-    return fs.existsSync(modeFilePath(id));
-  } catch {
-    return false;
-  }
+  if (!isBakedInMode(id)) return false;
+  const snap = BAKED_IN_SNAPSHOTS[id];
+  if (!snap) return false;
+  return JSON.stringify(MODES[id]) !== JSON.stringify(snap);
 }
 
 function reloadModes() {
@@ -1361,7 +1378,7 @@ app.get('/api/modes', (_req, res) => {
 app.get('/api/modes/raw', (_req, res) => {
   res.json({
     modes: VALID_MODES.map(id => editableMode(MODES[id])),
-    bakedInIds: Object.keys(FALLBACK_MODES),
+    bakedInIds: [...BAKED_IN_IDS],
   });
 });
 
