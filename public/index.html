@@ -568,11 +568,12 @@ function renderVaultFilterChips() {
 }
 
 function escapeHtml(text) {
-  return String(text)
+  return String(text ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function renderMath(root = document.body) {
@@ -838,10 +839,139 @@ function renderModeList() {
   }
 }
 
-// Stubs — Task 7 will fill these in.
-function openModeEditor(id) { console.log('[Task 7 stub] openModeEditor', id); }
-function deleteMode(id)    { console.log('[Task 7 stub] deleteMode', id); }
-function resetMode(id)     { console.log('[Task 7 stub] resetMode', id); }
+function openModeEditor(id) {
+  const panel = document.getElementById('modeEditorPanel');
+  if (!panel) return;
+  const existing = id ? state.editableModes.find(m => m.id === id) : null;
+  const isNew = !existing;
+  const m = existing || {
+    id: '', label: '', tagLabel: '', placeholder: '', description: '',
+    style: '', firstPageTemplate: '', childPageTemplate: '',
+    modeLabelForPrompt: '', inferKeywords: [], bakedIn: false, hasOverlay: false,
+  };
+  panel.hidden = false;
+  panel.innerHTML = `
+    <label>id <input type="text" id="me-id" value="${escapeHtml(m.id)}" ${isNew ? '' : 'readonly'} placeholder="lower_snake_case"></label>
+    <label>label <input type="text" id="me-label" value="${escapeHtml(m.label)}"></label>
+    <label>tagLabel <input type="text" id="me-tagLabel" value="${escapeHtml(m.tagLabel)}"></label>
+    <label>placeholder <input type="text" id="me-placeholder" value="${escapeHtml(m.placeholder || '')}"></label>
+    <label>description <input type="text" id="me-description" value="${escapeHtml(m.description || '')}"></label>
+    <label>style <textarea id="me-style">${escapeHtml(m.style)}</textarea></label>
+    <label>firstPageTemplate (must contain {{query}}) <textarea id="me-firstPageTemplate">${escapeHtml(m.firstPageTemplate)}</textarea></label>
+    <label>childPageTemplate <textarea id="me-childPageTemplate">${escapeHtml(m.childPageTemplate)}</textarea></label>
+    <label>modeLabelForPrompt <input type="text" id="me-modeLabelForPrompt" value="${escapeHtml(m.modeLabelForPrompt)}"></label>
+    <label>inferKeywords (comma-separated, optional) <input type="text" id="me-inferKeywords" value="${escapeHtml((m.inferKeywords || []).join(', '))}"></label>
+    <div class="field-error" id="me-error" hidden></div>
+    <div class="editor-actions">
+      <button type="button" id="me-cancel" class="mode-row-btn">Cancel</button>
+      <button type="button" id="me-save" class="settings-action-btn">Save</button>
+    </div>
+  `;
+  document.getElementById('me-cancel').addEventListener('click', () => { panel.hidden = true; panel.innerHTML = ''; });
+  document.getElementById('me-save').addEventListener('click', submitModeForm);
+}
+
+async function submitModeForm() {
+  const errorEl = document.getElementById('me-error');
+  errorEl.hidden = true;
+  errorEl.textContent = '';
+
+  const idEl = document.getElementById('me-id');
+  const id = (idEl.value || '').trim();
+  if (!/^[a-z][a-z0-9_]{0,30}$/.test(id)) {
+    errorEl.textContent = 'id must be lower_snake_case, start with a letter, max 31 chars';
+    errorEl.hidden = false;
+    return;
+  }
+
+  const payload = {
+    id,
+    label: document.getElementById('me-label').value.trim(),
+    tagLabel: document.getElementById('me-tagLabel').value.trim(),
+    placeholder: document.getElementById('me-placeholder').value,
+    description: document.getElementById('me-description').value,
+    style: document.getElementById('me-style').value,
+    firstPageTemplate: document.getElementById('me-firstPageTemplate').value,
+    childPageTemplate: document.getElementById('me-childPageTemplate').value,
+    modeLabelForPrompt: document.getElementById('me-modeLabelForPrompt').value.trim(),
+    inferKeywords: document.getElementById('me-inferKeywords').value
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean),
+  };
+  if (payload.inferKeywords.length === 0) delete payload.inferKeywords;
+
+  try {
+    const res = await fetch(`/api/modes/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      errorEl.textContent = data.error || `HTTP ${res.status}`;
+      errorEl.hidden = false;
+      return;
+    }
+    const data = await res.json();
+    state.modes = data.modes || [];
+    await loadEditableModes();
+    renderModeSelector();
+    reconcileActiveMode();
+    document.getElementById('modeEditorPanel').hidden = true;
+    document.getElementById('modeEditorPanel').innerHTML = '';
+  } catch (err) {
+    errorEl.textContent = String(err.message || err);
+    errorEl.hidden = false;
+  }
+}
+
+function reconcileActiveMode() {
+  if (state.mode === 'auto') return;
+  if (!state.modes.find(m => m.id === state.mode)) {
+    state.mode = 'auto';
+    const select = document.getElementById('modeSelect');
+    if (select) select.value = 'auto';
+  }
+}
+
+async function deleteMode(id) {
+  if (!confirm(`Delete mode "${id}"? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`/api/modes/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(`Delete failed: ${data.error || res.status}`);
+      return;
+    }
+    const data = await res.json();
+    state.modes = data.modes || [];
+    await loadEditableModes();
+    renderModeSelector();
+    reconcileActiveMode();
+  } catch (err) {
+    alert(`Delete failed: ${err.message}`);
+  }
+}
+
+async function resetMode(id) {
+  if (!confirm(`Reset "${id}" will discard your edits and restore the baked-in default. Continue?`)) return;
+  try {
+    const res = await fetch(`/api/modes/${encodeURIComponent(id)}/reset`, { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(`Reset failed: ${data.error || res.status}`);
+      return;
+    }
+    const data = await res.json();
+    state.modes = data.modes || [];
+    await loadEditableModes();
+    renderModeSelector();
+    reconcileActiveMode();
+  } catch (err) {
+    alert(`Reset failed: ${err.message}`);
+  }
+}
 
 function safePrimaryDrillKind(kind) {
   return kind === 'image' ? 'markdown' : kind;
