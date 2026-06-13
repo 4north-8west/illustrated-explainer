@@ -8,3 +8,5 @@ demos/*/extraction.jsonl
 demos/*/visualization.html
 demos/*/__pycache__/
 logs/
+
+.DS_Store

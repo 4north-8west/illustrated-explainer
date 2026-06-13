@@ -6,11 +6,11 @@
   },
   "classify": {
     "provider": "local",
-    "model": "auto"
+    "model": "large"
   },
   "analysis": {
     "provider": "local",
-    "model": "gemma-4-E4B"
+    "model": "large"
   },
   "editing": {
     "provider": "openai",
@@ -18,7 +18,13 @@
   },
   "drillText": {
     "provider": "local",
-    "model": "gemma-4-E4B-it-Q4_K_S"
+    "model": "large"
   },
-  "allowClassifyCloudFallback": false
+  "allowClassifyCloudFallback": false,
+  "localPorts": {
+    "small": 8082,
+    "small_model": "mlx-community/gemma-4-e4b-it-8bit",
+    "large": 8082,
+    "large_model": "mlx-community/gemma-4-26b-a4b-it-4bit"
+  }
 }
